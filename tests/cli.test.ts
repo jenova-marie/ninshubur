@@ -38,6 +38,16 @@ vi.mock("../src/scraper/store.ts", () => ({
   upsertChannel: vi.fn(),
 }));
 
+// The analyze tree pulls in @anthropic-ai/sdk, voyageai, and the
+// Qdrant client. None of those should be hit during CLI parser tests,
+// and voyageai has an ESM directory-import bug that crashes Node when
+// loaded. Stub the leaf modules.
+vi.mock("../src/analyze/taxonomy.ts", () => ({ runTaxonomy: vi.fn() }));
+vi.mock("../src/analyze/tag.ts", () => ({ runTag: vi.fn() }));
+vi.mock("../src/analyze/group.ts", () => ({ runGroup: vi.fn() }));
+vi.mock("../src/analyze/embed.ts", () => ({ runEmbed: vi.fn() }));
+vi.mock("../src/rag/query.ts", () => ({ runRagQuery: vi.fn() }));
+
 let buildProgram: typeof import("../src/cli.ts").buildProgram;
 
 beforeAll(async () => {
@@ -53,14 +63,23 @@ describe("cli program", () => {
     const program = buildProgram();
     const names = program.commands.map((cmd) => cmd.name()).sort();
     expect(names).toEqual([
+      "analyze",
       "backfill",
       "channels",
       "health",
       "migrate",
       "query",
+      "rag",
       "reset",
       "start",
     ]);
+  });
+
+  it("exposes the expected analyze subcommands", () => {
+    const program = buildProgram();
+    const analyze = program.commands.find((c) => c.name() === "analyze")!;
+    const names = analyze.commands.map((cmd) => cmd.name()).sort();
+    expect(names).toEqual(["embed", "group", "status", "tag", "taxonomy"]);
   });
 
   it("requires --yes on reset", () => {
