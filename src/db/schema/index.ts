@@ -7,3 +7,7 @@ export * from "./messages.ts";
 export * from "./attachments.ts";
 export * from "./reactions.ts";
 export * from "./state.ts";
+export * from "./categories.ts";
+export * from "./groups.ts";
+export * from "./embeddings.ts";
+export * from "./llm_jobs.ts";
