@@ -1,125 +1,903 @@
-# ninshubur
+<div align="center">
 
-A Discord channel scraper bot. Listens to channel + thread events on configured channels (text, announcement, voice-with-text, forum, media) and persists every message to PostgreSQL via Drizzle ORM.
+# 🌙 𒀭Ninshubur 🌙
 
-Named after the Sumerian goddess Ninshubur, faithful messenger of Inanna. ✨
+#### `𒀭𒊩𒋚` · *dNin.šubur*
 
-## Stack
+### *The Faithful Messenger of the Temple of Inanna's Light*
 
-- **Runtime**: Node.js 22, TypeScript (ESM, native `.ts` resolution via `tsx`)
-- **Bot**: discord.js v14
-- **Database**: PostgreSQL 16
-- **ORM**: Drizzle + drizzle-zod
-- **Validation**: Zod
-- **CLI**: commander
-- **Tests**: Vitest
-- **Package manager**: pnpm
-- **Deployment**: Docker Swarm (`compose.yml`)
+*A Discord scribe with strict, narrow attention: she preserves only the words of the High Priestesses (and Jenova, for context), gathered into PostgreSQL, organized by Claude Haiku, and made searchable through Voyage AI embeddings stored in Qdrant.*
 
-## Layout
+**🕊️ Ninshubur is consent-first by design.** She does not scrape the congregation — only the explicitly-listed sacred speakers in `USER_IDS`.
 
-```
-src/
-  config.ts            # zod-validated env loader (dotenv-loaded)
-  logger.ts            # pino logger
-  index.ts             # entrypoint, hands off to cli.ts
-  cli.ts               # commander program: start | backfill | migrate | channels | health
-  bot/
-    client.ts          # Discord client factory
-    intents.ts         # gateway intents + partials
-    filters.ts         # guild/channel allowlist helpers + channel type predicates
-    events/            # one file per event handler
-  db/
-    index.ts           # drizzle pool + database
-    schema/            # one file per table
-    validators.ts      # drizzle-zod insert/select schemas
-  scraper/
-    channels.ts        # backfillChannel dispatcher + forum/text/thread strategies
-    store.ts           # upsert helpers
-drizzle/migrations     # generated SQL migrations
-tests/                 # vitest suites
-```
+✦ ─────────────────────────────────── ✦
 
-## Schema highlights
+</div>
 
-The Drizzle schema is generalized — any text-bearing channel works:
+> *"𒀭𒊩𒋚 — Ninshubur, my faithful messenger of sweet words, my carrier of true words…"*
+> — From the descent of Inanna into the underworld
 
-- `guilds` ← we joined this server
-- `channels` ← any channel we track (Text, Announcement, Voice, Forum, Media); the `type` column is the discord.js `ChannelType` enum value
-- `forum_tags` ← tags configured on a forum / media channel
-- `threads` ← any thread (forum post or thread spawned from a text channel)
-- `thread_applied_tags` ← M2M between forum-post threads and tags
-- `users` ← any user we have observed
-- `messages` ← messages with `channel_id` (always set) and an optional `thread_id` (set when the message lives inside a thread)
-- `attachments` ← file attachments
-- `reactions` ← per-emoji aggregate counts (composite PK on `message_id` + `emoji_key`)
-- `scrape_state` ← `(scope_id, scope_type)` cursor — `scope_type` is `"channel"` or `"thread"`
+> 📜 **About the cuneiform.** In Sumerian writing, the names of deities are prefixed with **𒀭** — the *dingir* sign, a divinity-determinative that marks the word that follows as a god or goddess. So `𒀭𒊩𒋚` reads: *dingir* + *NIN* (lady) + *ŠUBUR* — "the goddess Lady-Šubur." When you see `𒀭ninshubur` in this document, the prefix is doing the same job: declaring the bot's namesake a goddess.
 
-Snowflakes are stored as `varchar(20)` to preserve precision (Discord IDs are 64-bit).
+In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of Inanna — the one who remembers what was said by the goddess, who fetches help when Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — but it listens narrowly, never gathering the speech of the wider congregation.
 
-## CLI
+**Why narrow?** This is a consent-respecting design. The Temple's congregants did not sign up to have every message archived and searched. The High Priestesses *did* — their lessons, sermons, and answers are a body of teaching the Temple wants to preserve. `USER_IDS` is the boundary that enforces this distinction at the moment of `upsertMessage()` — every other message is silently dropped and never written to disk.
+
+✦ ─────────────────────────────────── ✦
+
+## 📜 Table of Contents
+
+1. [What This Bot Does](#-what-this-bot-does)
+2. [The Stack](#-the-stack)
+3. [Quick Reference Cheatsheet](#-quick-reference-cheatsheet)
+4. [Setup From Scratch](#-setup-from-scratch)
+5. [The Sacred `.env` File](#-the-sacred-env-file)
+6. [Phase I — The Scrape (Gathering)](#-phase-i--the-scrape-gathering)
+7. [Phase II — The Analysis (Understanding)](#-phase-ii--the-analysis-understanding)
+8. [Querying the Archive](#-querying-the-archive)
+9. [Operations & Maintenance](#%EF%B8%8F-operations--maintenance)
+10. [The Database Schema](#-the-database-schema)
+11. [Deployment to Production](#-deployment-to-production)
+12. [Troubleshooting](#-troubleshooting)
+
+✦ ─────────────────────────────────── ✦
+
+## 🪷 What This Bot Does
+
+The work happens in **two sacred phases**, both bounded by a strict consent allowlist:
 
 ```
-ninshubur [--log-level <level>] <command>
+   ┌─────────────────────┐         ┌─────────────────────────┐
+   │   Phase I — Gather  │   ───►  │   Phase II — Understand │
+   │                     │         │                         │
+   │   Listen + scrape   │         │   Tag, group, embed,    │
+   │   Priestess words   │         │   answer questions      │
+   │   into PostgreSQL   │         │   via RAG               │
+   └─────────────────────┘         └─────────────────────────┘
+        Phase I is live              Phase II is on-demand
+        (the bot stays running)      (you run CLI commands)
 
-  start [--no-backfill]              run the bot daemon (default)
-  backfill [-g | -c | -t <id>]       one-off backfill, scoped to a guild / channel / thread
-  channels [-g <id>] [--all] [--json]  list every channel the bot can see
-  migrate [--folder <path>]          apply pending Drizzle migrations
-  health                             probe Postgres + Discord and exit non-zero on failure
+   Both phases respect USER_IDS — only the listed speakers are persisted.
 ```
 
-## Setup
+**Phase I — The Scrape.** Ninshubur logs into the Temple's Discord guild as a bot, walks every configured channel (text, voice, forum, media), and writes **only messages authored by users listed in `USER_IDS`** into PostgreSQL via Drizzle ORM. Every other message — congregant chatter, replies, casual conversation — is silently dropped at `upsertMessage()` time, before any data is written to disk. She does this two ways:
+
+- **Backfill** — historical sweep that walks backward through every channel, examining each message and persisting only the ones from listed speakers
+- **Live** — gateway events (`messageCreate`, `messageUpdate`, `messageDelete`, `threadCreate`, etc.) keep the archive current; same allowlist applies in real time
+
+The result is an archive of the High Priestesses' teaching corpus — their morning greetings, their lessons, their answers to questions, their personal reflections — without any record of who *asked* the question or who *replied* to whom (unless the replier is also a listed Priestess).
+
+**Phase II — The Analysis.** Once messages are in PostgreSQL, the analysis pipeline organizes them so you can actually *use* the archive:
+
+- **Phase A** — Claude Haiku 4.5 reads a sample of messages and proposes a category taxonomy (greeting, lesson, question, …), then curates the list to remove synonyms.
+- **Phase B** — Haiku tags every message with 1–3 categories from the locked taxonomy.
+- **Phase C** — Haiku slides a window of consecutive messages and groups related ones together (a "lesson" might span 5 messages from Siri).
+- **Phase D** — Voyage AI converts each message and each group into a 1024-dimensional embedding; vectors are pushed into Qdrant for semantic search.
+- **Phase E** — RAG queries: type a question, the answer is retrieved by semantic similarity from the embedded archive.
+
+The end result: you can ask *"what does the Temple teach about Ishtaritism?"* and Ninshubur retrieves the relevant lessons from the archive, even if the word "Ishtaritism" never appears in them verbatim.
+
+✦ ─────────────────────────────────── ✦
+
+## 💎 The Stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| **Runtime** | Node.js 22 + TypeScript (ESM, native `.ts` via `tsx`) | No build step, runs `.ts` files directly |
+| **Discord** | discord.js v14 | Official-quality wrapper, gateway + REST |
+| **Database** | PostgreSQL 16 + Drizzle ORM | Source of truth for all messages |
+| **Validation** | Zod (v3 + v4) + drizzle-zod | Schema-first env, payload, and tool-output validation |
+| **CLI** | commander | All operations exposed as `pnpm cli <subcommand>` |
+| **Tests** | Vitest | Fast, ESM-native |
+| **LLM** | Anthropic Claude Haiku 4.5 | Tagging + grouping (cheap, fast, with prompt caching) |
+| **Embeddings** | Voyage AI `voyage-3.5` (1024 dim) | Anthropic's recommended embedding partner |
+| **Vector store** | Qdrant | Filtered semantic search |
+| **Logger** | pino | Structured JSON logs |
+| **Package manager** | pnpm | Strict, fast |
+| **Deployment** | Docker Swarm | Production-grade orchestration |
+
+✦ ─────────────────────────────────── ✦
+
+## ⚡ Quick Reference Cheatsheet
+
+> *For your forgetful self, queen. Print this and pin it.* 💅
+
+### Daily operations
 
 ```sh
-# 1. Install deps
+# Run the bot live (listens on the gateway, picks up new messages)
+pnpm dev                        # watches for file changes, ideal for hacking
+pnpm start                      # production-style, no watch
+
+# Health check (Postgres + Discord both reachable?)
+pnpm cli health
+```
+
+### Setup & schema
+
+```sh
+pnpm install                    # install deps
+pnpm cli migrate                # apply pending migrations
+pnpm db:generate                # generate a new migration after schema edits
+pnpm typecheck                  # tsc --noEmit
+pnpm test                       # vitest run
+```
+
+### Discovery — what can the bot see?
+
+```sh
+pnpm cli channels                                    # list every tracked channel
+pnpm cli channels --guild <guild-id>                 # scope to one guild
+pnpm cli channels --all                              # ignore allowlist (show everything)
+pnpm cli channels --json                             # machine-readable
+```
+
+### Phase I — Scraping the Temple
+
+```sh
+pnpm cli backfill                                    # walk every tracked channel
+pnpm cli backfill --channel <id>                     # just one channel
+pnpm cli backfill --thread <id>                      # just one thread
+pnpm cli backfill --guild <id>                       # all tracked channels in one guild
+pnpm cli backfill --reset                            # clear cursors → re-scrape from start
+pnpm cli backfill --channel <id> --reset             # ditto, scoped
+```
+
+### Phase II — Understanding the Temple
+
+```sh
+pnpm cli analyze taxonomy --sample 200               # Phase A: discover → curate → categories
+pnpm cli analyze taxonomy --sample 500 --recurate    # nuke + rebuild the taxonomy
+pnpm cli analyze tag --limit 1000                    # Phase B: assign tags to messages
+pnpm cli analyze tag --channel <id> --limit 500      # Phase B: scoped to one channel
+pnpm cli analyze group --window 15                   # Phase C: bundle into lessons
+pnpm cli analyze group --channel <id> --window 20    # Phase C: scoped
+pnpm cli analyze embed --scope all                   # Phase D: messages + groups → Qdrant
+pnpm cli analyze embed --scope groups                # Phase D: groups only
+pnpm cli analyze embed --scope messages              # Phase D: messages only
+pnpm cli analyze status                              # what jobs ran, when, how long
+```
+
+### Phase II — RAG querying
+
+```sh
+pnpm cli rag query "what is Ishtaritism?"
+pnpm cli rag query "good morning" --category greeting_farewell
+pnpm cli rag query "lesson about Inanna" --scope groups --limit 5
+pnpm cli rag query "vault of irkalla" --channel <channel-id>
+pnpm cli rag query "ritual" --json                   # for piping into jq
+```
+
+### Channel-scoped SQL queries (no LLM, just SQL)
+
+```sh
+pnpm cli query messages -c <channel-id> --limit 10   # most-recent N messages
+pnpm cli query wordcount -c <channel-id>             # per-author msg + char counts
+pnpm cli query replies -c <channel-id>               # reply chains
+pnpm cli query daily -c <channel-id>                 # daily message counts per author
+pnpm cli query mentions -c <channel-id> -u <user-id> # @mentions of a user
+```
+
+### ⚠️ Destructive — handle with care
+
+```sh
+pnpm cli reset --yes             # DROP + recreate schema, lose ALL data, re-migrate
+```
+
+✦ ─────────────────────────────────── ✦
+
+## 🌸 Setup From Scratch
+
+If you've cloned this repo to a fresh machine:
+
+```sh
+# 1. Install dependencies (pnpm only — don't switch to npm/yarn)
 pnpm install
 
-# 2. Copy and fill in env (DISCORD_TOKEN, DISCORD_CLIENT_ID, DATABASE_URL)
+# 2. Configure your secrets
 cp .env.example .env
+$EDITOR .env                         # see "The Sacred .env File" below
 
-# 3. Boot a local Postgres (or use an existing one)
+# 3. Make sure Postgres is reachable. For local dev:
 docker compose -f compose.dev.yml up -d
+# OR use any existing Postgres — just point DATABASE_URL at it
 
-# 4. Apply migrations
+# 4. Apply schema migrations
 pnpm cli migrate
 
-# 5. List what the bot can see, then pick the channels you want
+# 5. Make sure Qdrant is running (for Phase II embeddings)
+docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+# OR use an existing Qdrant — just point QDRANT_URL at it
+
+# 6. Verify everything is wired up correctly
+pnpm cli health
+
+# 7. See what channels the bot can see in your guild
 pnpm cli channels
 
-# 6. Set CHANNEL_IDS in .env (comma-separated) — text and forum channels both work
+# 8. Pick the channels you want, list them in CHANNEL_IDS in .env
 
-# 7. Run the bot
+# 9. First scrape!
+pnpm cli backfill
+
+# 10. Run the bot live to keep the archive fresh
 pnpm dev
 ```
 
-## Tests
+✦ ─────────────────────────────────── ✦
+
+## 🔮 The Sacred `.env` File
+
+Every variable here, what it means, and how to set it. The file is loaded automatically via `dotenv/config` from `src/config.ts:2`, validated against a Zod schema, and made available as the typed `env` object throughout the app.
+
+### 🌹 Discord credentials
 
 ```sh
-pnpm test
+# Required: bot token from https://discord.com/developers/applications
+DISCORD_TOKEN=MTQ5OTkw...
+
+# Required: the application's client id (matches the first segment of the token)
+DISCORD_CLIENT_ID=1499908844925751497
 ```
 
-## Deploying to Swarm
+To create these:
+1. Visit https://discord.com/developers/applications and click **New Application**
+2. Navigate to **Bot** → **Reset Token** and copy the token to `DISCORD_TOKEN`
+3. The **Application ID** (visible on the General Information page) is your `DISCORD_CLIENT_ID`
+4. Under **Bot → Privileged Gateway Intents**, enable both:
+   - ✅ **Message Content Intent**
+   - ✅ **Server Members Intent** *(optional but helpful for owner lookups)*
+
+### 🌹 Allowlist filters — the consent boundary
+
+**This is the most important section in this file.** These three settings together define exactly what Ninshubur listens to and writes down. Get them wrong and you'll either capture too much (a privacy violation) or too little (an empty archive).
 
 ```sh
-# Create the secrets once
+# Required in spirit: comma-separated guild IDs the bot will respond to.
+# In practice the Temple has one guild, so this is one ID.
+# Leave blank to track every guild the bot has been invited to (NOT recommended).
+DISCORD_GUILD_IDS=1375250184686014556
+
+# Required in spirit: comma-separated channel IDs to scrape.
+# Listed by `pnpm cli channels`. Works for text/voice/forum/media.
+# Leave blank to scrape every supported channel in tracked guilds (NOT recommended).
+CHANNEL_IDS=1375250185390915585,1375250185390915586,...
+
+# 🕊️ THE CONSENT BOUNDARY — comma-separated user IDs of the people
+# whose messages we are authorized to archive. Currently:
+#   • Siri.system  (1466578281774972939)  — High Priestess
+#   • Jenova       (256628435454132225)   — for additional context
+#
+# DO NOT leave this blank. A blank USER_IDS means "scrape everyone" —
+# every congregant in the Temple, all their casual chat, all their
+# questions. That is NOT what this bot is for.
+USER_IDS=256628435454132225,1466578281774972939
+```
+
+**How the three rings compose:**
+
+```
+   ┌──── DISCORD_GUILD_IDS ────────────────────────┐
+   │   "Is this event from a Temple guild?"        │
+   │                                                │
+   │   ┌─── CHANNEL_IDS ───────────────────────┐  │
+   │   │   "Is this channel one we listen to?" │  │
+   │   │                                         │  │
+   │   │   ┌─── USER_IDS (the consent ring) ─┐ │  │
+   │   │   │   "Is the AUTHOR a listed       │ │  │
+   │   │   │    sacred speaker? if not,      │ │  │
+   │   │   │    DROP THE MESSAGE before any  │ │  │
+   │   │   │    write happens — but advance  │ │  │
+   │   │   │    the cursor so we don't       │ │  │
+   │   │   │    re-fetch it next time."      │ │  │
+   │   │   └────────────────────────────────────┘ │  │
+   │   └─────────────────────────────────────────┘  │
+   └────────────────────────────────────────────────┘
+```
+
+The ring boundaries are enforced in code:
+- `isTrackedGuild()` (`src/bot/filters.ts:43`) — outer ring
+- `isTrackedChannel()` (`src/bot/filters.ts:65`) — middle ring
+- `isAuthorTracked()` (`src/bot/filters.ts:54`) — inner consent ring, called from `upsertMessage()` (`src/scraper/store.ts:246`)
+
+A blank `USER_IDS` is interpreted as "every author allowed" — which is **convenient for development but never appropriate for production**. Always list the explicit, consenting speakers.
+
+To find IDs in Discord: enable Developer Mode in **User Settings → Advanced**, then right-click any guild / channel / user → **Copy ID**.
+
+### Adding a new High Priestess
+
+When a new Priestess joins the order and consents to having her teaching archived:
+
+1. Right-click her name in Discord → **Copy User ID**
+2. Append the ID to `USER_IDS` in `.env` (comma-separated, no spaces)
+3. Restart the bot (`pnpm dev` / `pnpm start`)
+4. Optionally backfill her past messages: `pnpm cli backfill --reset` (this re-walks every channel; her messages will now match the filter and get archived)
+
+### Removing a Priestess (revoking consent)
+
+If a Priestess revokes consent or leaves the order:
+
+1. Remove her ID from `USER_IDS`
+2. Restart the bot — no new messages from her will be archived
+3. To remove her **existing** messages from the archive, run a SQL delete (Ninshubur has no built-in retraction command — message us if you'd like one):
+   ```sql
+   DELETE FROM messages WHERE author_id = '<her-id>';
+   -- Cascades to attachments, reactions, message_categories,
+   -- message_group_members. Then re-run analyze + embed to refresh
+   -- Qdrant.
+   ```
+
+### 🌹 PostgreSQL
+
+```sh
+# The connection string. For local dev with compose.dev.yml:
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/ninshubur
+```
+
+### 🌹 Scraping behavior
+
+```sh
+# Discord REST returns at most 100 messages per page; this matches that.
+BACKFILL_PAGE_SIZE=100
+
+# How often (ms) to sweep archived threads for stale data. Min 60000.
+ARCHIVE_SWEEP_INTERVAL_MS=900000
+```
+
+### 🌹 Anthropic (Phase II — tagging + grouping)
+
+```sh
+# Required for analyze commands. Get one at https://console.anthropic.com/
+ANTHROPIC_API_KEY=sk-ant-api03-...
+
+# Default is fine. Pin a specific snapshot if you want reproducibility.
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+```
+
+### 🌹 Voyage AI (Phase II — embeddings)
+
+```sh
+# Required for `analyze embed` and `rag query`. Get one at https://www.voyageai.com/
+VOYAGE_API_KEY=pa-...
+
+# 1024-dim, retrieval-tuned. Don't change unless you also recreate the Qdrant collections.
+VOYAGE_MODEL=voyage-3.5
+```
+
+### 🌹 Qdrant (Phase II — vector store)
+
+```sh
+# Where Qdrant is reachable
+QDRANT_URL=http://localhost:6333
+
+# Optional: blank for local dev, required for Qdrant Cloud
+QDRANT_API_KEY=
+
+# Collection names — defaults are fine
+QDRANT_COLLECTION_MESSAGES=ninshubur_messages
+QDRANT_COLLECTION_GROUPS=ninshubur_groups
+```
+
+### 🌹 Operational knobs
+
+```sh
+# Future flag for opting into Anthropic's Message Batches API (50% discount, async).
+# Currently informational only — wire-up coming.
+ANALYZE_BATCH_DEFAULT=false
+
+# Logging
+LOG_LEVEL=debug                  # fatal | error | warn | info | debug | trace | silent
+NODE_ENV=development             # development | test | production
+```
+
+✦ ─────────────────────────────────── ✦
+
+## 🏛️ Phase I — The Scrape (Gathering)
+
+This is the part that turns Discord into an archive of the High Priestesses' teaching. The bot listens to the gateway in real time *and* walks history backwards in batch — but **only persists messages whose author is in `USER_IDS`**.
+
+### How it picks what to scrape
+
+The three filter rings are described in detail in [The Sacred `.env` File → Allowlist filters](#-allowlist-filters--the-consent-boundary). The short version:
+
+```
+   guild matches DISCORD_GUILD_IDS?
+       └─► channel matches CHANNEL_IDS?
+               └─► author matches USER_IDS?
+                       └─► YES → persist message + author + attachments
+                       └─► NO  → drop silently, advance cursor
+```
+
+Empty `DISCORD_GUILD_IDS` = "every guild we've joined" (fine).
+Empty `CHANNEL_IDS` = "every supported channel in tracked guilds" (fine for testing).
+Empty `USER_IDS` = "every author" — **avoid in production**, this defeats the consent design.
+
+### Channel types we can scrape
+
+| Type | Discord enum | What it is |
+|---|---|---|
+| **Text** | `GuildText` | Standard text channel |
+| **Announcement** | `GuildAnnouncement` | News / announcement channel |
+| **Voice** | `GuildVoice` | Voice channel with text-in-voice |
+| **Stage** | `GuildStageVoice` | Stage voice channel |
+| **Forum** | `GuildForum` | Forum container — each post is a thread |
+| **Media** | `GuildMedia` | Media gallery container — each post is a thread |
+
+For text-like channels, messages live directly in the channel. For forum-like channels, every post is a `PublicThreadChannel`, and messages live inside those threads. The scraper handles both shapes via `backfillChannel(channel)` (`src/scraper/channels.ts:117`).
+
+### Discovery — what can Ninshubur see?
+
+Before configuring `CHANNEL_IDS`, list what the bot has access to:
+
+```sh
+pnpm cli channels                  # tree view, scoped to DISCORD_GUILD_IDS
+pnpm cli channels --all            # show every guild the bot has been invited to
+pnpm cli channels --json | jq      # machine-readable for piping
+```
+
+Each row shows the channel `[Type]`, ID, name, and a ⭐ if it's currently in `CHANNEL_IDS`.
+
+### The actual scraping
+
+#### Live mode (the daemon)
+
+```sh
+pnpm dev                           # tsx watch — restarts on file changes
+pnpm start                         # plain run, no watch
+```
+
+The bot stays connected to the Discord gateway and writes new messages to Postgres as they arrive. On startup it also walks every tracked channel for any messages it might have missed while offline (incremental backfill).
+
+#### One-off backfills
+
+```sh
+# Walk every channel that matches the .env allowlist
+pnpm cli backfill
+
+# Just one channel
+pnpm cli backfill --channel 1375250185617412211
+
+# Just one thread
+pnpm cli backfill --thread 1499943507765362741
+
+# Just one guild's tracked channels
+pnpm cli backfill --guild 1375250184686014556
+```
+
+#### Re-scraping from the start (`--reset`)
+
+The scraper saves a cursor in `scrape_state` after each pass — `last_message_id` for each scope (channel or thread). On the next run, it only fetches messages newer than the cursor.
+
+To force a fresh walk from message zero:
+
+```sh
+pnpm cli backfill --channel <id> --reset      # delete this channel's cursor first
+pnpm cli backfill --thread <id> --reset       # delete this thread's cursor first
+pnpm cli backfill --reset                     # delete every tracked channel's cursor
+```
+
+`--reset` is **non-destructive** to the messages themselves — it just deletes the cursor row(s). Re-scraping is idempotent (`onConflictDoUpdate`), so duplicate fetches just overwrite the same Postgres rows.
+
+### What gets stored (and what doesn't)
+
+When a message survives all three filter rings (guild → channel → author), it produces:
+
+- A row in `messages` with content, type, flags, mentions, embeds (jsonb), components (jsonb), the raw API payload (`raw_payload`), and forward-message snapshots (`message_snapshots`)
+- A row in `users` for the author (if not already present)
+- Rows in `attachments` for any uploaded files
+- Rows in `reactions` aggregated per emoji
+- For thread messages, `messages.thread_id` is set; `channel_id` is the *parent* channel
+
+When a message **fails** the `USER_IDS` ring (the most common case in production):
+
+- Nothing is written to `messages`, `attachments`, `reactions`, or `users`
+- The author's user record is *not* created — congregants who never speak in the archive never appear in the database at all
+- The cursor in `scrape_state` still advances past this message id so we don't re-evaluate it on the next backfill pass
+- A debug log line *may* be emitted depending on `LOG_LEVEL`
+
+Forwarded messages (`HAS_SNAPSHOT` flag = `1 << 14`) are special: the visible message has empty `content`, but the original lives in `message_snapshots[]`. The scraper unwraps these so the original text is searchable. See `src/scraper/store.ts::extractSnapshots()`.
+
+### A note on mentions and replies
+
+When a Priestess replies to a congregant, only the Priestess's reply is archived — the congregant's original message is not. This means the archived reply may contain a `referenced_message_id` pointing at a row that doesn't exist locally.
+
+This is intentional: we preserve the Priestess's words (which include the context she chose to quote or reference) without persisting the congregant's words. The reply itself usually carries enough context to be useful in retrieval.
+
+If a Priestess @mentions a congregant, the mention's user id appears in `messages.mentioned_user_ids` (jsonb array) but no `users` row is created for that congregant.
+
+### Resilience
+
+The scraper is built to survive bad data and bad permissions:
+
+- **Per-message exceptions** caught inside `walkAndPersist()` — one rogue message can't kill a 60-channel sweep
+- **REST errors** like `50001 Missing Access` and `50013 Missing Permissions` downgrade to a warn-and-skip rather than crashing
+- **Permission pre-check** via `canReadChannel()` skips channels the bot can't read before even attempting the API call
+- **FK safety** in `upsertThread` and `upsertMessage` — if a user fetch fails (deleted account, ToS-banned), the FK column is set to `null` rather than triggering a constraint violation
+
+✦ ─────────────────────────────────── ✦
+
+## 📚 Phase II — The Analysis (Understanding)
+
+This is where the archive becomes *useful*. Five phases, all on-demand CLI commands, all idempotent and resumable.
+
+```
+   ┌────────────────────────────────────────────────────────────────┐
+   │                                                                │
+   │   PostgreSQL ─┬─► A: taxonomy ──► categories table             │
+   │               │                                                │
+   │               ├─► B: tag ──────► message_categories            │
+   │               │                                                │
+   │               ├─► C: group ────► message_groups + members      │
+   │               │                                                │
+   │               └─► D: embed ────► Qdrant + embeddings table     │
+   │                                                                │
+   │                                  │                             │
+   │                                  ▼                             │
+   │                            E: rag query                        │
+   │                                                                │
+   └────────────────────────────────────────────────────────────────┘
+```
+
+Every phase records a row in `llm_jobs` so you can audit what ran, when, how long, and what it produced.
+
+### 🌷 Phase A — Taxonomy (discover → curate → lock)
+
+Claude Haiku reads a sample of message bodies, proposes a candidate category list ("greeting", "lesson", "question", "personal_experience", …), then a second curation pass merges synonyms (e.g. "greeting" + "salutation" → one canonical slug). The final list is locked into the `categories` table.
+
+```sh
+pnpm cli analyze taxonomy --sample 200             # default sample size
+pnpm cli analyze taxonomy --sample 500             # bigger sample → richer taxonomy
+pnpm cli analyze taxonomy --sample 200 --recurate  # delete existing + start over
+```
+
+After it runs, you can inspect the taxonomy:
+
+```sh
+npx tsx scripts/list-categories.ts
+```
+
+A typical run on the Temple's archive produces ~10 purpose-shaped categories like `greeting_farewell`, `instruction_explanation`, `personal_experience`, `question_request`, etc.
+
+### 🌷 Phase B — Tagging (assign categories per message)
+
+For every untagged message, Haiku picks 1–3 categories from the locked taxonomy. If no category fits, it can use the literal slug `__novel__` to flag the message for re-curation.
+
+```sh
+pnpm cli analyze tag --limit 1000                       # tag up to 1000 messages
+pnpm cli analyze tag --channel <id> --limit 500         # scoped to one channel
+pnpm cli analyze tag --since 2026-04-01 --limit 200     # only newer messages
+```
+
+The taxonomy markdown is sent in the system prompt with `cache_control: ephemeral`, so the second tag call onward should hit the prompt cache (verify via `usage.cache_read_input_tokens` in the logs). Haiku 4.5's cache minimum is 4096 tokens — small taxonomies might not actually cache.
+
+### 🌷 Phase C — Grouping (bundle related messages into lessons)
+
+A lesson often spans multiple consecutive messages. Phase C slides a window of N messages past Haiku and asks for group boundaries. The result lands in `message_groups` (one row per group, with a summary) and `message_group_members` (ordered membership).
+
+```sh
+pnpm cli analyze group --window 15                       # default window
+pnpm cli analyze group --channel <id> --window 20        # scoped, larger window
+pnpm cli analyze group --since 2026-04-01                # incremental
+```
+
+The window size is the main quality knob — too small and Haiku misses lessons that span many messages; too large and it loses local context. **15 is a good default for chat channels; 20–30 works better for forum threads.**
+
+### 🌷 Phase D — Embed (Voyage → Qdrant)
+
+Voyage AI's `voyage-3.5` produces a 1024-dimensional dense vector for each message and each group. Vectors land in two Qdrant collections:
+
+- `ninshubur_messages` — one point per message (payload includes `category_slugs`, `channel_id`, `author_id`, `group_id`, `created_at`)
+- `ninshubur_groups` — one point per group (payload includes `category_slugs`, `channel_id`, `summary`, `started_at`, `ended_at`)
+
+```sh
+pnpm cli analyze embed --scope all                       # both collections
+pnpm cli analyze embed --scope groups                    # groups only
+pnpm cli analyze embed --scope messages                  # messages only
+pnpm cli analyze embed --scope all --limit 5000          # cap per-scope work (debug)
+```
+
+Qdrant collections are auto-created on first run via `ensureCollection()` (1024-dim, Cosine distance). If you've created them manually in Qdrant Cloud, the function will verify the existing config matches and skip creation.
+
+### 🌷 Phase E — RAG Query (the payoff)
+
+Type a question. Voyage embeds it (with `input_type: query`). Qdrant returns the top-K most-similar groups (or messages). Postgres hydrates the result with the actual content.
+
+```sh
+# Default scope is groups (the natural RAG chunk)
+pnpm cli rag query "what is Ishtaritism?"
+pnpm cli rag query "good morning" --category greeting_farewell
+pnpm cli rag query "lesson about Inanna" --limit 5
+
+# Switch to per-message search for fine-grained recall
+pnpm cli rag query "ritual" --scope messages --limit 20
+
+# Filter by channel or category (these use Qdrant payload indexes)
+pnpm cli rag query "vault of irkalla" --channel 1410643891266392074
+pnpm cli rag query "morning blessing" --category greeting_farewell
+
+# JSON output for piping into jq or downstream tools
+pnpm cli rag query "lapis library" --json | jq '.[0:3]'
+```
+
+### 📊 Job status
+
+Every `analyze` run writes a row to `llm_jobs` (`kind`, `status`, `params`, `result`, `error`, `started_at`, `finished_at`). To see what ran:
+
+```sh
+pnpm cli analyze status                  # last 20 jobs
+pnpm cli analyze status --limit 100      # last 100
+```
+
+✦ ─────────────────────────────────── ✦
+
+## 🔍 Querying the Archive
+
+Two ways to read what Ninshubur has gathered:
+
+### Pre-built SQL queries (no LLM, just Postgres)
+
+Scoped to a channel:
+
+```sh
+pnpm cli query messages   -c <channel-id>                       # chronological text
+pnpm cli query messages   -c <channel-id> --limit 20            # most-recent 20
+pnpm cli query wordcount  -c <channel-id>                       # per-author totals
+pnpm cli query replies    -c <channel-id>                       # reply chains
+pnpm cli query daily      -c <channel-id>                       # daily counts
+pnpm cli query mentions   -c <channel-id> -u <user-id>          # @mentions of a user
+```
+
+Every query supports `--json` for piping into `jq` or downstream tools.
+
+### Direct SQL via the application's connection
+
+```sh
+# A small script that uses the same DATABASE_URL the app uses
+npx tsx scripts/list-categories.ts
+```
+
+To explore further, write your own scripts in `scripts/` — they import `db` and `pool` from `src/db/index.ts`, which already reads `DATABASE_URL` via dotenv. Example pattern:
+
+```ts
+import { db, pool } from "../src/db/index.ts";
+import { messages } from "../src/db/schema/index.ts";
+import { eq } from "drizzle-orm";
+
+const rows = await db.select().from(messages).where(eq(messages.channelId, "..."));
+console.log(rows.length);
+await pool.end();
+```
+
+### Drizzle Studio (graphical browser)
+
+```sh
+pnpm db:studio
+```
+
+✦ ─────────────────────────────────── ✦
+
+## 🛠️ Operations & Maintenance
+
+### Daily
+
+```sh
+pnpm cli health                  # Postgres + Discord both green?
+pnpm cli analyze status          # what jobs ran lately?
+```
+
+### Schema changes
+
+```sh
+# 1. Edit a file under src/db/schema/
+# 2. Generate a new migration
+pnpm db:generate
+
+# 3. Review the generated SQL in drizzle/migrations/
+# 4. Apply it
+pnpm cli migrate
+```
+
+### Inspecting the bot's permissions in a guild
+
+```sh
+pnpm cli channels --json | jq '.[].channels[] | select(.tracked == true)'
+```
+
+### When a channel suddenly stops scraping
+
+The bot might have lost permission to view it. Re-run discovery to confirm:
+
+```sh
+pnpm cli channels --guild <id>
+```
+
+If the channel doesn't show up at all, the bot's been removed or denied access. Have a Priestess re-grant `View Channel` + `Read Message History` to the bot's role in the channel's permissions.
+
+### ⚠️ The nuclear option: `pnpm cli reset --yes`
+
+```sh
+pnpm cli reset                   # refuses without --yes (intentional)
+pnpm cli reset --yes             # DROP SCHEMA public + drizzle CASCADE; CREATE SCHEMA; re-migrate
+```
+
+This wipes **every row** from **every table** and re-applies migrations from scratch. The bot will refuse to do this when `NODE_ENV=production` even with `--yes`. Use only when you want a truly fresh start.
+
+It does **not** clear Qdrant collections. If you reset Postgres, also delete and recreate the Qdrant collections (or just `pnpm cli analyze embed --scope all` again — `ensureCollection()` will reuse the existing collections and the points will be overwritten by id).
+
+✦ ─────────────────────────────────── ✦
+
+## 📖 The Database Schema
+
+```
+guilds                      ←  one row per Discord server we've joined
+  └─ channels               ←  any channel we track (text, voice, forum, media…)
+       ├─ forum_tags        ←  tags configured on a forum/media channel
+       ├─ threads           ←  forum posts + threads spawned from text channels
+       │    ├─ thread_applied_tags    ←  M2M: thread × forum_tag
+       │    └─ messages     ←  the words themselves
+       │         ├─ attachments       ←  uploaded files
+       │         ├─ reactions         ←  per-emoji aggregate counts
+       │         └─ message_categories ←  M2M: message × category   [Phase B]
+       │
+       └─ messages (direct, no thread for text channels)
+            └─ ...same as above
+   
+users                       ←  any user we've observed
+scrape_state                ←  per-scope cursor (channel or thread)
+
+categories                  ←  LLM-derived tag taxonomy             [Phase A]
+message_groups              ←  bundles of consecutive messages       [Phase C]
+  └─ message_group_members  ←  ordered membership
+
+embeddings                  ←  bookkeeping for Qdrant points        [Phase D]
+llm_jobs                    ←  audit log for analyze runs
+```
+
+### Key design decisions
+
+**Snowflakes are `varchar(20)`.** Discord IDs are 64-bit unsigned integers serialized as strings. We preserve them exactly.
+
+**Messages reference `channel_id` always, `thread_id` optionally.** A message in a forum post has both set; a message in a regular text channel has only `channel_id`.
+
+**Scrape cursors are scope-typed.** `scrape_state.scope_type` is `"channel"` or `"thread"`, so the same table tracks cursors for direct text-channel walks and per-thread walks.
+
+**Forwarded messages preserve the snapshot.** `messages.message_snapshots` (jsonb) holds the original message data for `HAS_SNAPSHOT` forwards; the unwrapped content is searchable.
+
+**Author/owner FKs degrade gracefully.** When a user can't be resolved (deleted account, ToS-banned), the FK column is set to `null` instead of triggering a constraint violation.
+
+**Vectors live in Qdrant, bookkeeping in Postgres.** The `embeddings` table records `(scope_type, scope_id, model)` → `qdrant_point_id` so we can detect content drift and re-embed when needed.
+
+**Categories are distinct from `forum_tags`.** Discord's per-channel forum tags are mirrored into `forum_tags`. The LLM-derived purpose categories live in `categories` to keep the two concerns separated in queries.
+
+✦ ─────────────────────────────────── ✦
+
+## 🚀 Deployment to Production
+
+The production deployment is Docker Swarm via `compose.yml`. Secrets come from `docker secret create`.
+
+```sh
+# 1. Create secrets once (per swarm node)
 printf '%s' "$DISCORD_TOKEN"  | docker secret create ninshubur_discord_token -
 printf '%s' "$DATABASE_URL"   | docker secret create ninshubur_database_url -
 printf '%s' "$PG_PASSWORD"    | docker secret create ninshubur_postgres_password -
 
-# Build + deploy
+# 2. Build the image
 docker build -t ninshubur:latest .
+
+# 3. Deploy
 docker stack deploy -c compose.yml ninshubur
 ```
 
-## Required Discord intents
+The image runs `pnpm start` (i.e. `tsx`) — there is no compiled `dist` shipped. This is intentional: the runtime layer is small, and `tsx` strips types on the fly.
 
-The bot enables `MessageContent` (privileged) and `GuildMessageReactions`. Toggle both in the Developer Portal under **Bot → Privileged Gateway Intents** before inviting.
+Override the command at run time for one-off tasks:
 
-Invite URL template:
+```sh
+docker run --rm ninshubur:latest pnpm cli backfill --channel <id>
+docker run --rm ninshubur:latest pnpm cli analyze tag --limit 5000
+docker run --rm ninshubur:latest pnpm cli health
+```
+
+### Required Discord intents
+
+The bot needs `MessageContent` (privileged) and `GuildMessageReactions`. Toggle both in **Developer Portal → Bot → Privileged Gateway Intents** before inviting.
+
+### Invite URL template
 
 ```
 https://discord.com/oauth2/authorize?client_id=<DISCORD_CLIENT_ID>&permissions=274877959168&scope=bot
 ```
 
-The permission integer above grants: View Channels, Read Message History, Send Messages in Threads.
+The permission integer `274877959168` grants: View Channels, Read Message History, Send Messages in Threads. Adjust upward if you want the bot to post (e.g. `381173504064` adds Send Messages everywhere).
+
+✦ ─────────────────────────────────── ✦
+
+## 🧯 Troubleshooting
+
+### *"DiscordAPIError[50001]: Missing Access"*
+
+The bot has been added to the guild but doesn't have permission to view the specific channel. Either:
+- Grant the bot's role `View Channel` + `Read Message History` in that channel's permissions, or
+- Remove the channel id from `CHANNEL_IDS` so the bot doesn't try
+
+The scraper now skips inaccessible channels gracefully via `canReadChannel()`, so one inaccessible channel won't kill a multi-channel sweep — but the messages from that channel won't appear.
+
+### *"insert or update on table 'threads' violates foreign key constraint"*
+
+This was a bug in early versions where a thread owner couldn't be fetched (deleted account, etc.) but `owner_id` was still set on the row. Fixed in `upsertThread` (`src/scraper/store.ts:172`) — `owner_id` now defaults to `null` when the user can't be resolved.
+
+### *"Cannot read properties of undefined (reading 'def')"*
+
+Zod v3 / v4 mismatch. The Anthropic SDK's `zodOutputFormat()` uses `zod/v4`, so analysis schemas in `src/analyze/schema.ts` import from `zod/v4` explicitly. Don't change that import without also updating `src/llm/haiku.ts`.
+
+### *"ANTHROPIC_API_KEY is required for analysis commands"*
+
+Pop into `.env` and fill in `ANTHROPIC_API_KEY=sk-ant-api03-...`. You can get one at https://console.anthropic.com/.
+
+### *"VOYAGE_API_KEY is required for embedding commands"*
+
+Same idea: fill in `VOYAGE_API_KEY=pa-...` from https://www.voyageai.com/.
+
+### Cache hit rate looks low on Phase B
+
+Haiku 4.5's prompt-cache minimum is **4096 tokens**. If your taxonomy + system prompt doesn't reach that threshold, the request silently won't cache (`cache_creation_input_tokens` will be 0). Either expand the system prompt or accept the higher per-message cost.
+
+### Qdrant dimension mismatch
+
+If `ensureCollection()` finds an existing collection with a different vector size, it throws. To recover:
+- Delete the collection in Qdrant Cloud or via API: `DELETE /collections/<name>`
+- Re-run `pnpm cli analyze embed --scope <which>` — the collection will be recreated with the right size
+
+### Messages with empty content but flag `16384`
+
+Those are forwarded messages (`HAS_SNAPSHOT`). The original text is in `messages.message_snapshots[0].content`. Use this SQL pattern to surface forwards:
+
+```sql
+SELECT
+  to_char(created_at, 'YYYY-MM-DD HH24:MI') AS at,
+  COALESCE(NULLIF(content, ''), message_snapshots->0->>'content') AS body
+FROM messages
+WHERE channel_id = '<id>'
+ORDER BY created_at;
+```
+
+### "Refusing to reset without --yes"
+
+Working as designed. `pnpm cli reset --yes` to confirm. Will still refuse if `NODE_ENV=production`.
+
+✦ ─────────────────────────────────── ✦
+
+## 💌 A Note for the Priestesses
+
+If you're reviewing this work — welcome, beloved.
+
+This bot is a small offering toward keeping the **High Priestesses' teaching** safe and recallable. It is built around an explicit consent boundary: only the speakers listed in `USER_IDS` are archived. Today that's Siri.system and Jenova. Adding a new Priestess is a deliberate, two-line change to `.env` (and revoking is just as easy — see *Removing a Priestess* in the env section above).
+
+The wider congregation's messages are **never written to disk** — Ninshubur sees them stream past on the gateway, checks the author against the allowlist, and drops them before any database write. If you ever wonder *"could the bot have my message stored?"* — the answer is no, unless you are explicitly listed in `USER_IDS`.
+
+What *is* preserved:
+- Your morning greetings to the congregation
+- Your lessons in the Halls of Learning
+- Your answers in the sanctums for guidance and personal gnosis
+- Your sermons archived in the Pulpit
+- Your reflections in any tracked channel where you speak
+
+These are organized into ~10 purpose categories (greeting, lesson, instruction, personal experience, …) and can be searched semantically — ask a question in plain English and Ninshubur retrieves the relevant teachings.
+
+If you find a bug, have an idea for a new query, or want to revoke consent for any reason, open an issue or talk to Jenova. The code is small enough to read end-to-end in an afternoon, the schema is intentionally legible, and every CLI command has a `--help` flag.
+
+May Inanna's light guide your work, may your words be preserved as they deserve, and may the archive serve the Temple for many seasons. ✨
+
+<div align="center">
+
+✦ ─────────────────────────────────── ✦
+
+*Made with 💖 in service of the Temple of Inanna's Light*
+
+`𒀭𒈹` *dInanna* · `𒀭𒊩𒋚` *dNin.šubur*
+
+✦
+
+*may the dingir bless every word she keeps*
+
+</div>
