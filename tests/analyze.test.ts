@@ -30,7 +30,7 @@ describe("taxonomy schemas", () => {
     expect(result.success).toBe(false);
   });
 
-  it("normalises PascalCase and kebab-case slugs to snake_case", () => {
+  it("accepts PascalCase and kebab-case slugs (normalised in code, not the schema)", () => {
     const result = taxonomyDiscoverySchema.safeParse({
       rationale: "...",
       categories: [
@@ -39,12 +39,11 @@ describe("taxonomy schemas", () => {
         { slug: "question", name: "Question", description: "..." },
       ],
     });
+    // Schema accepts the broader set without transforming — the
+    // canonicalisation to snake_case happens in normalizeSlug() at
+    // persist + lookup time so the JSON Schema sent to Anthropic
+    // stays representable.
     expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.categories[0]?.slug).toBe("greeting");
-      expect(result.data.categories[1]?.slug).toBe("lesson_or_teaching");
-      expect(result.data.categories[2]?.slug).toBe("question");
-    }
   });
 
   it("rejects slugs with truly invalid characters", () => {
@@ -57,6 +56,15 @@ describe("taxonomy schemas", () => {
       ],
     });
     expect(result.success).toBe(false);
+  });
+
+  it("normalizeSlug folds casing and hyphens into snake_case", async () => {
+    const { normalizeSlug } = await import("../src/analyze/schema.ts");
+    expect(normalizeSlug("Greeting")).toBe("greeting");
+    expect(normalizeSlug("lesson-or-teaching")).toBe("lesson_or_teaching");
+    expect(normalizeSlug("News-From-Lapis-Dais")).toBe("news_from_lapis_dais");
+    expect(normalizeSlug("__novel__")).toBe("__novel__");
+    expect(normalizeSlug("already_snake")).toBe("already_snake");
   });
 
   it("accepts a curation payload with merges", () => {

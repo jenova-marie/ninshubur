@@ -10,7 +10,7 @@ import { logger } from "../logger.ts";
 import { structured } from "../llm/haiku.ts";
 import { categoryIdsBySlug, loadTaxonomyMarkdown } from "./taxonomy.ts";
 import { messageTagPrompt } from "../prompts/index.ts";
-import { messageTagSchema } from "./schema.ts";
+import { messageTagSchema, normalizeSlug } from "./schema.ts";
 import { withJob } from "./job.ts";
 
 export interface TagOptions {
@@ -78,14 +78,19 @@ export async function runTag(opts: TagOptions = {}): Promise<void> {
 
         const rows: NewMessageCategory[] = [];
         for (const cat of response.data.categories) {
-          if (cat.slug === "__novel__") {
+          // Normalise Haiku's slug to canonical snake_case before
+          // comparing against the locked taxonomy. This rescues
+          // PascalCase / kebab-case drift without losing real "the
+          // model picked something not in the list" cases.
+          const slug = normalizeSlug(cat.slug);
+          if (slug === "__novel__") {
             skippedNovel += 1;
             continue;
           }
-          const categoryId = slugToId.get(cat.slug);
+          const categoryId = slugToId.get(slug);
           if (!categoryId) {
             logger.warn(
-              { slug: cat.slug, messageId: msg.id },
+              { slug, originalSlug: cat.slug, messageId: msg.id },
               "haiku produced an unknown slug — skipping",
             );
             continue;

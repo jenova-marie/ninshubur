@@ -10,6 +10,7 @@ import {
   taxonomyDiscoveryPrompt,
 } from "../prompts/index.ts";
 import {
+  normalizeSlug,
   taxonomyCurationSchema,
   taxonomyDiscoverySchema,
 } from "./schema.ts";
@@ -108,8 +109,10 @@ export async function runTaxonomy(opts: TaxonomyOptions = {}): Promise<void> {
       logger.warn("existing categories deleted (recurate)");
     }
 
+    // Normalise to canonical snake_case at persist time so the
+    // `categories.slug` column never holds mixed casing or hyphens.
     const rows: NewCategory[] = curated.data.finalCategories.map((c) => ({
-      slug: c.slug,
+      slug: normalizeSlug(c.slug),
       name: c.name,
       description: c.description,
       source: env.ANTHROPIC_MODEL,
