@@ -5,6 +5,14 @@
   "description": "Discord scraper + RAG pipeline for the Temple of Inanna's Light",
   "license": "MIT",
   "author": "Jenova Marie <jenova-marie@pm.me>",
+  "homepage": "https://github.com/jenova-marie/ninshubur#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jenova-marie/ninshubur.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jenova-marie/ninshubur/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
