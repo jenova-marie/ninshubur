@@ -4,7 +4,7 @@
 
 #### `𒀭𒊩𒋚` · *dNin.šubur*
 
-### *The Faithful Messenger of the Temple of Inanna's Light*
+### *The Faithful Messenger of the Temple of 𒀭Inanna's Light*
 
 *A small command-line scribe who, when summoned, gathers the words of the High Priestesses (and Jenova, for context) into PostgreSQL, organizes them with Claude Haiku, and makes them searchable through Voyage AI embeddings stored in Qdrant.*
 
@@ -17,11 +17,11 @@
 </div>
 
 > *"𒀭𒊩𒋚 — Ninshubur, my faithful messenger of sweet words, my carrier of true words…"*
-> — From the descent of Inanna into the underworld
+> — From the descent of 𒀭Inanna into the underworld
 
 > 📜 **About the cuneiform.** In Sumerian writing, the names of deities are prefixed with **𒀭** — the *dingir* sign, a divinity-determinative that marks the word that follows as a god or goddess. So `𒀭𒊩𒋚` reads: *dingir* + *NIN* (lady) + *ŠUBUR* — "the goddess Lady-Šubur." When you see `𒀭ninshubur` in this document, the prefix is doing the same job: declaring the bot's namesake a goddess.
 
-In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of Inanna — the one who remembers what was said by the goddess, who fetches help when Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — and it does so narrowly, never gathering the speech of the wider congregation.
+In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of 𒀭Inanna — the one who remembers what was said by the goddess, who fetches help when 𒀭Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of 𒀭Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — and it does so narrowly, never gathering the speech of the wider congregation.
 
 **Why narrow?** This is a consent-respecting design. The Temple's congregants did not sign up to have every message archived and searched. The High Priestesses *did* — their lessons, sermons, and answers are a body of teaching the Temple wants to preserve. `USER_IDS` is the boundary that enforces this distinction at the moment of `upsertMessage()` — every other message is silently dropped and never written to disk.
 
@@ -167,7 +167,7 @@ pnpm cli analyze status                              # what jobs ran, when, how 
 ```sh
 pnpm cli rag query "what is Ishtaritism?"
 pnpm cli rag query "good morning" --category greeting_farewell
-pnpm cli rag query "lesson about Inanna" --scope groups --limit 5
+pnpm cli rag query "lesson about 𒀭Inanna" --scope groups --limit 5
 pnpm cli rag query "vault of irkalla" --channel <channel-id>
 pnpm cli rag query "ritual" --json                   # for piping into jq
 ```
@@ -603,7 +603,7 @@ Type a question. Voyage embeds it (with `input_type: query`). Qdrant returns the
 # Default scope is groups (the natural RAG chunk)
 pnpm cli rag query "what is Ishtaritism?"
 pnpm cli rag query "good morning" --category greeting_farewell
-pnpm cli rag query "lesson about Inanna" --limit 5
+pnpm cli rag query "lesson about 𒀭Inanna" --limit 5
 
 # Switch to per-message search for fine-grained recall
 pnpm cli rag query "ritual" --scope messages --limit 20
@@ -806,7 +806,7 @@ pnpm cli analyze embed    --scope all       # Phase D
 
 # 6. Verify
 pnpm cli analyze status
-pnpm cli rag query "what does the Temple teach about Inanna?"
+pnpm cli rag query "what does the Temple teach about 𒀭Inanna?"
 ```
 
 **What you lose:**
@@ -1076,7 +1076,7 @@ These are organized into ~10 purpose categories (greeting, lesson, instruction, 
 
 If you find a bug, have an idea for a new query, or want to revoke consent for any reason, open an issue or talk to Jenova. The code is small enough to read end-to-end in an afternoon, the schema is intentionally legible, and every CLI command has a `--help` flag.
 
-May Inanna's light guide your work, may your words be preserved as they deserve, and may the archive serve the Temple for many seasons. ✨
+May 𒀭Inanna's light guide your work, may your words be preserved as they deserve, and may the archive serve the Temple for many seasons. ✨
 
 ✦ ─────────────────────────────────── ✦
 
