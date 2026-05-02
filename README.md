@@ -1094,12 +1094,12 @@ Copyright © 2026 Jenova Marie.
 
 ✦ ─────────────────────────────────── ✦
 
-*Made with 💖 in service of the Temple of Inanna's Light*
+*Made with 💖 in service of 𒀭Inanna*
 
 `𒀭𒈹` *dInanna* · `𒀭𒊩𒋚` *dNin.šubur*
 
 ✦
 
-*may the dingir bless every word she keeps*
+*may 𒀭Inanna bless this code*
 
 </div>
