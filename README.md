@@ -269,13 +269,13 @@ CHANNEL_IDS=1375250185390915585,1375250185390915586,...
 
 # 🕊️ THE CONSENT BOUNDARY — comma-separated user IDs of the people
 # whose messages we are authorized to archive. Currently:
-#   • Siri.system  (1466578281774972939)  — High Priestess
-#   • Jenova       (256628435454132225)   — for additional context
+#   • Siri.system  (1466578280000000000)  — High Priestess
+#   • Jenova       (256628430000000000)   — for additional context
 #
 # DO NOT leave this blank. A blank USER_IDS means "scrape everyone" —
 # every congregant in the Temple, all their casual chat, all their
 # questions. That is NOT what this bot is for.
-USER_IDS=256628435454132225,1466578281774972939
+USER_IDS=256628430000000000,1466578280000000000
 ```
 
 **How the three rings compose:**
@@ -740,7 +740,7 @@ Best when you want to **preserve the existing taxonomy, tags, and groups** — o
 ```sh
 # 1. Add her snowflake to USER_IDS in .env (comma-separated, no spaces)
 #    Right-click her name in Discord → Copy User ID
-USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
+USER_IDS=256628430000000000,1466578280000000000,<NEW_ID>
 
 # 2. Re-walk every tracked channel from message zero. There is no live
 #    bot to restart — 𒀭Ninshubur reads .env fresh on every invocation.
@@ -780,7 +780,7 @@ Best when you want a **perfectly consistent archive** — fresh taxonomy across 
 
 ```sh
 # 1. Add her snowflake to USER_IDS in .env
-USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
+USER_IDS=256628430000000000,1466578280000000000,<NEW_ID>
 
 # 2. Wipe Postgres (drops public + drizzle schemas, re-applies migrations)
 pnpm cli reset --yes
@@ -849,7 +849,7 @@ Same as Path B above for adding, but with her ID **removed** from `USER_IDS` fir
 
 ```sh
 # 1. Remove her ID from USER_IDS in .env
-USER_IDS=256628435454132225,1466578281774972939   # her ID removed
+USER_IDS=256628430000000000,1466578280000000000   # her ID removed
 
 # 2. Wipe Postgres and Qdrant — see Path B above for the commands
 
