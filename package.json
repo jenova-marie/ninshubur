@@ -26,6 +26,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "@qdrant/js-client-rest": "^1.17.0",
     "commander": "^12.1.0",
     "discord.js": "^14.26.2",
     "dotenv": "^16.4.7",
