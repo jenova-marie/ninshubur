@@ -1,0 +1,1 @@
+ALTER TABLE "attachments" ALTER COLUMN "duration_secs" SET DATA TYPE double precision;
