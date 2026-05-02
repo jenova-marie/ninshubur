@@ -33,13 +33,24 @@ export function registerAnalyzeCommand(program: Command): void {
     .option("-c, --channel <id>", "Restrict to this channel")
     .option("--since <iso>", "Only tag messages on/after this ISO timestamp")
     .option("--limit <n>", "Max messages to tag this run", "1000")
+    .option(
+      "--concurrency <n>",
+      "Number of Haiku calls in flight at once (1-20)",
+      "5",
+    )
     .action(
-      async (opts: { channel?: string; since?: string; limit: string }) => {
+      async (opts: {
+        channel?: string;
+        since?: string;
+        limit: string;
+        concurrency: string;
+      }) => {
         try {
           await runTag({
             ...(opts.channel ? { channelId: opts.channel } : {}),
             ...(opts.since ? { since: opts.since } : {}),
             limit: Number(opts.limit),
+            concurrency: Number(opts.concurrency),
           });
         } finally {
           await pool.end();
@@ -53,13 +64,24 @@ export function registerAnalyzeCommand(program: Command): void {
     .option("-c, --channel <id>", "Restrict to this channel")
     .option("--since <iso>", "Only group messages on/after this ISO timestamp")
     .option("--window <n>", "Window size in messages (2-40)", "15")
+    .option(
+      "--concurrency <n>",
+      "Number of windows processed in parallel (1-20)",
+      "5",
+    )
     .action(
-      async (opts: { channel?: string; since?: string; window: string }) => {
+      async (opts: {
+        channel?: string;
+        since?: string;
+        window: string;
+        concurrency: string;
+      }) => {
         try {
           await runGroup({
             ...(opts.channel ? { channelId: opts.channel } : {}),
             ...(opts.since ? { since: opts.since } : {}),
             windowSize: Number(opts.window),
+            concurrency: Number(opts.concurrency),
           });
         } finally {
           await pool.end();
