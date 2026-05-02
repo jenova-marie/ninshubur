@@ -9,11 +9,29 @@
 // it will be consumed by.
 import { z } from "zod/v4";
 
+/**
+ * Tolerant slug parser.
+ *
+ * Haiku tends to produce snake_case but occasionally slips into
+ * kebab-case ("news-from-lapis-dais") or PascalCase ("Greeting"),
+ * which made the prior strict regex reject otherwise-valid tag
+ * assignments. We now accept letters, digits, hyphens, and
+ * underscores in either case, then normalise to canonical
+ * lowercase snake_case via .transform — so downstream code only
+ * ever sees one shape, and the lookup against the locked
+ * taxonomy in tag.ts works the same regardless of which casing
+ * Haiku chose this time.
+ *
+ * Unknown normalised slugs still fall through to "skip with warn"
+ * in tag.ts, so this widening doesn't change semantics — it just
+ * stops Zod from blowing up on cosmetic format drift.
+ */
 const slug = z
   .string()
   .min(1)
   .max(64)
-  .regex(/^[a-z0-9_]+$/, "slug must be lowercase alphanumeric with underscores");
+  .regex(/^[a-zA-Z0-9_-]+$/, "slug must be alphanumeric with hyphens or underscores")
+  .transform((value) => value.toLowerCase().replace(/-/g, "_"));
 
 /** Phase A: discovery — Haiku proposes the tag taxonomy. */
 export const taxonomyDiscoverySchema = z.object({

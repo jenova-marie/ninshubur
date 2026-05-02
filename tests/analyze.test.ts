@@ -30,11 +30,28 @@ describe("taxonomy schemas", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects non-snake_case slugs", () => {
+  it("normalises PascalCase and kebab-case slugs to snake_case", () => {
     const result = taxonomyDiscoverySchema.safeParse({
       rationale: "...",
       categories: [
         { slug: "Greeting", name: "Greeting", description: "..." },
+        { slug: "lesson-or-teaching", name: "Lesson", description: "..." },
+        { slug: "question", name: "Question", description: "..." },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.categories[0]?.slug).toBe("greeting");
+      expect(result.data.categories[1]?.slug).toBe("lesson_or_teaching");
+      expect(result.data.categories[2]?.slug).toBe("question");
+    }
+  });
+
+  it("rejects slugs with truly invalid characters", () => {
+    const result = taxonomyDiscoverySchema.safeParse({
+      rationale: "...",
+      categories: [
+        { slug: "has spaces", name: "Spaces", description: "..." },
         { slug: "lesson", name: "Lesson", description: "..." },
         { slug: "question", name: "Question", description: "..." },
       ],
