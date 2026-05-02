@@ -8,18 +8,18 @@
 
 *A small command-line scribe who, when summoned, gathers the words of the High Priestesses (and Jenova, for context) into PostgreSQL, organizes them with Claude Haiku, and makes them searchable through Voyage AI embeddings stored in Qdrant.*
 
-**🕊️ Ninshubur is consent-first by design.** She archives only the explicitly-listed sacred speakers in `USER_IDS` — never the wider congregation.
+**🕊️ 𒀭Ninshubur is consent-first by design.** She archives only the explicitly-listed sacred speakers in `USER_IDS` — never the wider congregation.
 
-**⏸️ Ninshubur is not a live monitor.** She is a CLI tool. She does not sit in the Temple's guild watching messages stream by, does not subscribe to gateway events, does not run in the background. She only reads Discord when Jenova explicitly types a command like `pnpm cli backfill`. Between invocations she is asleep — no process, no connection, no listening.
+**⏸️ 𒀭Ninshubur is not a live monitor.** She is a CLI tool. She does not sit in the Temple's guild watching messages stream by, does not subscribe to gateway events, does not run in the background. She only reads Discord when Jenova explicitly types a command like `pnpm cli backfill`. Between invocations she is asleep — no process, no connection, no listening.
 
 ✦ ─────────────────────────────────── ✦
 
 </div>
 
-> *"𒀭𒊩𒋚 — Ninshubur, my faithful messenger of sweet words, my carrier of true words…"*
+> *"𒀭𒊩𒋚 — 𒀭Ninshubur, my faithful messenger of sweet words, my carrier of true words…"*
 > — From the descent of 𒀭Inanna into the underworld
 
-> 📜 **About the cuneiform.** In Sumerian writing, the names of deities are prefixed with **𒀭** — the *dingir* sign, a divinity-determinative that marks the word that follows as a god or goddess. So `𒀭𒊩𒋚` reads: *dingir* + *NIN* (lady) + *ŠUBUR* — "the goddess Lady-Šubur." When you see `𒀭ninshubur` in this document, the prefix is doing the same job: declaring the bot's namesake a goddess.
+> 📜 **About the cuneiform.** In Sumerian writing, the names of deities are prefixed with **𒀭** — the *dingir* sign, a divinity-determinative that marks the word that follows as a god or goddess. So `𒀭𒊩𒋚` reads: *dingir* + *NIN* (lady) + *ŠUBUR* — "the goddess Lady-Šubur." When you see `𒀭Ninshubur` in this document, the prefix is doing the same job: declaring the bot's namesake a goddess.
 
 In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of 𒀭Inanna — the one who remembers what was said by the goddess, who fetches help when 𒀭Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of 𒀭Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — and it does so narrowly, never gathering the speech of the wider congregation.
 
@@ -58,14 +58,14 @@ The work happens in **two sacred phases**, both bounded by a strict consent allo
    │   PostgreSQL        │         │   via RAG               │
    └─────────────────────┘         └─────────────────────────┘
         Both phases are entirely on-demand.
-        Ninshubur is a CLI tool — there is no daemon,
+        𒀭Ninshubur is a CLI tool — there is no daemon,
         no live listener, no background process.
         She acts only when you invoke her.
 
    Both phases respect USER_IDS — only the listed speakers are persisted.
 ```
 
-**Phase I — The Scrape.** When Jenova runs `pnpm cli backfill`, Ninshubur briefly logs into Discord, walks the configured channels' history through Discord's REST API, and writes **only messages authored by users listed in `USER_IDS`** into PostgreSQL via Drizzle ORM. Any message from someone not in `USER_IDS` is filtered out during the scrape and never persisted. When the backfill completes, Ninshubur disconnects and exits — the next invocation is a brand-new login.
+**Phase I — The Scrape.** When Jenova runs `pnpm cli backfill`, 𒀭Ninshubur briefly logs into Discord, walks the configured channels' history through Discord's REST API, and writes **only messages authored by users listed in `USER_IDS`** into PostgreSQL via Drizzle ORM. Any message from someone not in `USER_IDS` is filtered out during the scrape and never persisted. When the backfill completes, 𒀭Ninshubur disconnects and exits — the next invocation is a brand-new login.
 
 The result is an archive of the High Priestesses' teaching corpus — their morning greetings, their lessons, their answers to questions, their personal reflections — captured at the moments Jenova chooses to run a scrape. There is no record of who *asked* a question or who *replied* to whom (unless the replier is also a listed Priestess), and no record at all between scrapes.
 
@@ -77,7 +77,7 @@ The result is an archive of the High Priestesses' teaching corpus — their morn
 - **Phase D** — Voyage AI converts each message and each group into a 1024-dimensional embedding; vectors are pushed into Qdrant for semantic search.
 - **Phase E** — RAG queries: type a question, the answer is retrieved by semantic similarity from the embedded archive.
 
-The end result: you can ask *"what does the Temple teach about Ishtaritism?"* and Ninshubur retrieves the relevant lessons from the archive, even if the word "Ishtaritism" never appears in them verbatim.
+The end result: you can ask *"what does the Temple teach about Ishtaritism?"* and 𒀭Ninshubur retrieves the relevant lessons from the archive, even if the word "Ishtaritism" never appears in them verbatim.
 
 ✦ ─────────────────────────────────── ✦
 
@@ -115,7 +115,7 @@ pnpm cli backfill                       # incremental sweep since last cursor
 pnpm cli backfill --reset               # full re-walk from message zero
 ```
 
-> Ninshubur exits when each command finishes. Nothing is left running.
+> 𒀭Ninshubur exits when each command finishes. Nothing is left running.
 
 ### Setup & schema
 
@@ -254,7 +254,7 @@ To create these:
 
 ### 🌹 Allowlist filters — the consent boundary
 
-**This is the most important section in this file.** These three settings together define exactly what Ninshubur scrapes and writes down when you run a backfill. Get them wrong and you'll either capture too much (a privacy violation) or too little (an empty archive).
+**This is the most important section in this file.** These three settings together define exactly what 𒀭Ninshubur scrapes and writes down when you run a backfill. Get them wrong and you'll either capture too much (a privacy violation) or too little (an empty archive).
 
 ```sh
 # Required in spirit: comma-separated guild IDs the bot will respond to.
@@ -408,7 +408,7 @@ Empty `USER_IDS` = "every author" — **avoid in production**, this defeats the 
 
 For text-like channels, messages live directly in the channel. For forum-like channels, every post is a `PublicThreadChannel`, and messages live inside those threads. The scraper handles both shapes via `backfillChannel(channel)` (`src/scraper/channels.ts:117`).
 
-### Discovery — what can Ninshubur see?
+### Discovery — what can 𒀭Ninshubur see?
 
 Before configuring `CHANNEL_IDS`, list what the bot has access to:
 
@@ -422,7 +422,7 @@ Each row shows the channel `[Type]`, ID, name, and a ⭐ if it's currently in `C
 
 ### The actual scraping — `pnpm cli backfill`
 
-Every scrape happens via the `backfill` subcommand. Ninshubur logs in, walks the configured channels through Discord's REST API, and exits when finished. There's no idle state, no listener, no "is the bot online?" question — between runs, Ninshubur is simply not running.
+Every scrape happens via the `backfill` subcommand. 𒀭Ninshubur logs in, walks the configured channels through Discord's REST API, and exits when finished. There's no idle state, no listener, no "is the bot online?" question — between runs, 𒀭Ninshubur is simply not running.
 
 ```sh
 # Walk every channel that matches the .env allowlist
@@ -516,7 +516,7 @@ Every phase records a row in `llm_jobs` so you can audit what ran, when, how lon
 
 ### 🪶 The Prompts Live as Markdown — for the Priestesses to Edit
 
-Every Haiku-driven phase loads its system prompt from a markdown file in [`src/prompts/`](src/prompts/). A Priestess can read, review, and **directly edit** the instructions Ninshubur gives Claude — no TypeScript edit, no rebuild, no redeploy needed for the CLI. Just save the file and run the relevant `pnpm cli analyze ...` command again.
+Every Haiku-driven phase loads its system prompt from a markdown file in [`src/prompts/`](src/prompts/). A Priestess can read, review, and **directly edit** the instructions 𒀭Ninshubur gives Claude — no TypeScript edit, no rebuild, no redeploy needed for the CLI. Just save the file and run the relevant `pnpm cli analyze ...` command again.
 
 | Phase | Prompt file | What it tells Haiku |
 |---|---|---|
@@ -629,7 +629,7 @@ pnpm cli analyze status --limit 100      # last 100
 
 ## 🔍 Querying the Archive
 
-Two ways to read what Ninshubur has gathered:
+Two ways to read what 𒀭Ninshubur has gathered:
 
 ### Pre-built SQL queries (no LLM, just Postgres)
 
@@ -725,7 +725,7 @@ It does **not** clear Qdrant collections. If you reset Postgres, also delete and
 
 ## 👑 Adding (or Removing) a Priestess
 
-When a new High Priestess joins the order and consents to having her teaching archived — or when an existing Priestess revokes consent — Ninshubur needs to know. The configuration change is just two lines in `.env`. Capturing (or removing) her **historical** messages then takes a multi-step workflow because the data lives in two places: PostgreSQL and Qdrant.
+When a new High Priestess joins the order and consents to having her teaching archived — or when an existing Priestess revokes consent — 𒀭Ninshubur needs to know. The configuration change is just two lines in `.env`. Capturing (or removing) her **historical** messages then takes a multi-step workflow because the data lives in two places: PostgreSQL and Qdrant.
 
 This section walks through both directions.
 
@@ -743,7 +743,7 @@ Best when you want to **preserve the existing taxonomy, tags, and groups** — o
 USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
 
 # 2. Re-walk every tracked channel from message zero. There is no live
-#    bot to restart — Ninshubur reads .env fresh on every invocation.
+#    bot to restart — 𒀭Ninshubur reads .env fresh on every invocation.
 #    --reset clears the cursor so the historical archive is re-evaluated
 #    against the new USER_IDS. Existing messages get idempotently
 #    re-touched; new Priestess's messages get inserted for the first time.
@@ -839,7 +839,7 @@ pnpm cli rag query "what does the Temple teach about 𒀭Inanna?"
 
 ### 🌹 Removing a Priestess (revoking consent)
 
-When a Priestess revokes consent or leaves the order, Ninshubur should stop archiving her *and* delete her existing data from every store.
+When a Priestess revokes consent or leaves the order, 𒀭Ninshubur should stop archiving her *and* delete her existing data from every store.
 
 There are two paths here too — incremental and reset — but the **reset path is strongly recommended for revocations** because it gives you a clean privacy guarantee with zero risk of orphaned state in Qdrant or stale Postgres rows.
 
@@ -861,7 +861,7 @@ pnpm cli analyze group    --window 15
 pnpm cli analyze embed    --scope all
 ```
 
-After this completes, **no trace of her words exists** in any system Ninshubur owns — Postgres or Qdrant. (The original Discord messages of course still exist on Discord's servers; revocation here means revoking *Ninshubur's* archive, not Discord's.)
+After this completes, **no trace of her words exists** in any system 𒀭Ninshubur owns — Postgres or Qdrant. (The original Discord messages of course still exist on Discord's servers; revocation here means revoking *Ninshubur's* archive, not Discord's.)
 
 #### 🌷 Path B — Surgical (faster, but leaves edges to clean)
 
@@ -1086,7 +1086,7 @@ Released under the [MIT License](LICENSE) — see the `LICENSE` file in the repo
 
 > **In plain language:** you may copy, modify, redistribute, and use this code for any purpose (personal, commercial, or otherwise) at no cost, provided the copyright notice and license text travel with it. There is **no warranty** — the software is provided as-is.
 
-The license covers the **code** of Ninshubur. The Temple's archive content (messages, lessons, teachings — the data Ninshubur gathers and embeds) belongs to the High Priestesses who authored it and is **not** licensed by this project.
+The license covers the **code** of Ninshubur. The Temple's archive content (messages, lessons, teachings — the data 𒀭Ninshubur gathers and embeds) belongs to the High Priestesses who authored it and is **not** licensed by this project.
 
 Copyright © 2026 Jenova Marie.
 
