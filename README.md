@@ -36,9 +36,10 @@ In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of
 7. [Phase II — The Analysis (Understanding)](#-phase-ii--the-analysis-understanding)
 8. [Querying the Archive](#-querying-the-archive)
 9. [Operations & Maintenance](#%EF%B8%8F-operations--maintenance)
-10. [The Database Schema](#-the-database-schema)
-11. [Deployment to Production](#-deployment-to-production)
-12. [Troubleshooting](#-troubleshooting)
+10. [Adding (or Removing) a Priestess](#-adding-or-removing-a-priestess)
+11. [The Database Schema](#-the-database-schema)
+12. [Deployment to Production](#-deployment-to-production)
+13. [Troubleshooting](#-troubleshooting)
 
 ✦ ─────────────────────────────────── ✦
 
@@ -304,28 +305,7 @@ A blank `USER_IDS` is interpreted as "every author allowed" — which is **conve
 
 To find IDs in Discord: enable Developer Mode in **User Settings → Advanced**, then right-click any guild / channel / user → **Copy ID**.
 
-### Adding a new High Priestess
-
-When a new Priestess joins the order and consents to having her teaching archived:
-
-1. Right-click her name in Discord → **Copy User ID**
-2. Append the ID to `USER_IDS` in `.env` (comma-separated, no spaces)
-3. Restart the bot (`pnpm dev` / `pnpm start`)
-4. Optionally backfill her past messages: `pnpm cli backfill --reset` (this re-walks every channel; her messages will now match the filter and get archived)
-
-### Removing a Priestess (revoking consent)
-
-If a Priestess revokes consent or leaves the order:
-
-1. Remove her ID from `USER_IDS`
-2. Restart the bot — no new messages from her will be archived
-3. To remove her **existing** messages from the archive, run a SQL delete (Ninshubur has no built-in retraction command — message us if you'd like one):
-   ```sql
-   DELETE FROM messages WHERE author_id = '<her-id>';
-   -- Cascades to attachments, reactions, message_categories,
-   -- message_group_members. Then re-run analyze + embed to refresh
-   -- Qdrant.
-   ```
+> 👑 **Adding or removing a Priestess** is a multi-step workflow that touches `.env`, the bot, the database, and the vector store. The full procedure (with two paths — incremental vs reset — and the revocation flow) lives in its own section below: [👑 Adding (or Removing) a Priestess](#-adding-or-removing-a-priestess).
 
 ### 🌹 PostgreSQL
 
@@ -540,7 +520,26 @@ This is where the archive becomes *useful*. Five phases, all on-demand CLI comma
 
 Every phase records a row in `llm_jobs` so you can audit what ran, when, how long, and what it produced.
 
+### 🪶 The Prompts Live as Markdown — for the Priestesses to Edit
+
+Every Haiku-driven phase loads its system prompt from a markdown file in [`src/prompts/`](src/prompts/). A Priestess can read, review, and **directly edit** the instructions Ninshubur gives Claude — no TypeScript edit, no rebuild, no redeploy needed for the CLI. Just save the file and run the relevant `pnpm cli analyze ...` command again.
+
+| Phase | Prompt file | What it tells Haiku |
+|---|---|---|
+| **A1** — discover | [`src/prompts/taxonomy-discovery.md`](src/prompts/taxonomy-discovery.md) | "Propose 6–25 mutually-exclusive purpose-shaped categories from this sample." |
+| **A2** — curate | [`src/prompts/taxonomy-curation.md`](src/prompts/taxonomy-curation.md) | "Merge synonyms in this candidate list and emit the final locked taxonomy." |
+| **B** — tag | [`src/prompts/message-tag.md`](src/prompts/message-tag.md) | "Pick 1–3 categories from the locked taxonomy for this message; use `__novel__` if nothing fits." |
+| **C** — group | [`src/prompts/group-window.md`](src/prompts/group-window.md) | "Bundle these consecutive messages into a disjoint, contiguous, exhaustive group cover with summaries." |
+
+The loader is [`src/prompts/index.ts`](src/prompts/index.ts) — it reads each file at first use and caches it for the lifetime of the process. The prompts ship inside the Docker image too (under `src/prompts/`), so production deployments use the same files.
+
+> ✨ **Why markdown?** The prompts include rules, heuristics, and worked examples — formats that are much easier to maintain in markdown than in escaped TypeScript strings. Haiku reads markdown natively (heading levels, bold, code fences all carry meaning to it), so the file you see is *exactly* what the model sees.
+
+> 💡 **Editing in production.** The live daemon (`pnpm dev` / `pnpm start`) caches prompts in-memory, so an edit during a run won't be picked up until the bot restarts. The on-demand `pnpm cli analyze ...` commands always start a fresh process and read fresh prompts.
+
 ### 🌷 Phase A — Taxonomy (discover → curate → lock)
+
+Driven by [`src/prompts/taxonomy-discovery.md`](src/prompts/taxonomy-discovery.md) and [`src/prompts/taxonomy-curation.md`](src/prompts/taxonomy-curation.md).
 
 Claude Haiku reads a sample of message bodies, proposes a candidate category list ("greeting", "lesson", "question", "personal_experience", …), then a second curation pass merges synonyms (e.g. "greeting" + "salutation" → one canonical slug). The final list is locked into the `categories` table.
 
@@ -560,6 +559,8 @@ A typical run on the Temple's archive produces ~10 purpose-shaped categories lik
 
 ### 🌷 Phase B — Tagging (assign categories per message)
 
+Driven by [`src/prompts/message-tag.md`](src/prompts/message-tag.md).
+
 For every untagged message, Haiku picks 1–3 categories from the locked taxonomy. If no category fits, it can use the literal slug `__novel__` to flag the message for re-curation.
 
 ```sh
@@ -571,6 +572,8 @@ pnpm cli analyze tag --since 2026-04-01 --limit 200     # only newer messages
 The taxonomy markdown is sent in the system prompt with `cache_control: ephemeral`, so the second tag call onward should hit the prompt cache (verify via `usage.cache_read_input_tokens` in the logs). Haiku 4.5's cache minimum is 4096 tokens — small taxonomies might not actually cache.
 
 ### 🌷 Phase C — Grouping (bundle related messages into lessons)
+
+Driven by [`src/prompts/group-window.md`](src/prompts/group-window.md).
 
 A lesson often spans multiple consecutive messages. Phase C slides a window of N messages past Haiku and asks for group boundaries. The result lands in `message_groups` (one row per group, with a summary) and `message_group_members` (ordered membership).
 
@@ -723,6 +726,188 @@ pnpm cli reset --yes             # DROP SCHEMA public + drizzle CASCADE; CREATE 
 This wipes **every row** from **every table** and re-applies migrations from scratch. The bot will refuse to do this when `NODE_ENV=production` even with `--yes`. Use only when you want a truly fresh start.
 
 It does **not** clear Qdrant collections. If you reset Postgres, also delete and recreate the Qdrant collections (or just `pnpm cli analyze embed --scope all` again — `ensureCollection()` will reuse the existing collections and the points will be overwritten by id).
+
+✦ ─────────────────────────────────── ✦
+
+## 👑 Adding (or Removing) a Priestess
+
+When a new High Priestess joins the order and consents to having her teaching archived — or when an existing Priestess revokes consent — Ninshubur needs to know. The configuration change is just two lines in `.env`, but capturing (or removing) her **historical** messages from the archive takes a multi-step workflow because the data lives in three places: Postgres, Qdrant, and the live Discord gateway state.
+
+This section walks through both directions.
+
+### 🌹 Adding a new Priestess — pick a path
+
+**Two paths** — incremental and reset. The choice is mostly about how much you care about taxonomy continuity vs ease of reasoning.
+
+#### 🌷 Path A — Incremental (faster, surgical)
+
+Best when you want to **preserve the existing taxonomy, tags, and groups** — only the new Priestess's messages get added on top of an established archive.
+
+```sh
+# 1. Add her snowflake to USER_IDS in .env (comma-separated, no spaces)
+#    Right-click her name in Discord → Copy User ID
+USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
+
+# 2. Restart the live bot so the new allowlist takes effect
+#    (Ctrl-C the running daemon, then start it again)
+pnpm dev    # or pnpm start
+
+# 3. Re-walk every tracked channel from message zero
+#    --reset clears the cursor so the historical archive is re-evaluated
+#    against the new USER_IDS. Existing messages get idempotently
+#    re-touched; new Priestess's messages get inserted for the first time.
+pnpm cli backfill --reset
+
+# 4. Tag the new messages (Phase B picks them up automatically —
+#    only untagged messages are processed)
+pnpm cli analyze tag --limit 10000
+
+# 5. Group the new messages — see "grouping caveat" below
+pnpm cli analyze group --window 15
+
+# 6. Embed the new messages and groups
+pnpm cli analyze embed --scope all
+
+# 7. Verify
+pnpm cli rag query "test the new voice"
+```
+
+> ⚠️ **Grouping caveat.** Phase C only operates on messages that aren't already in a group. If the new Priestess's messages are interleaved chronologically with existing groups, you'll get small "solo" groups for her messages instead of them being merged into the surrounding conversational context. For most channels this is fine — her words still land coherently, just not bundled with the surrounding speakers. For chat-heavy channels where the new Priestess regularly converses with the existing ones, prefer Path B for cleaner bundles.
+
+**Estimated cost / time (incremental):**
+
+| | |
+|---|---|
+| Wall-clock | ~5–15 min |
+| Anthropic + Voyage cost | ~$1–5 (mostly Phase B tagging on the new messages) |
+| What it preserves | Existing taxonomy, all existing tags, all existing groups, `llm_jobs` audit history |
+| What it adds | Just the new Priestess's data |
+
+#### 🌷 Path B — Reset and rebuild (cleaner, slower, costlier)
+
+Best when you want a **perfectly consistent archive** — fresh taxonomy across all Priestesses, perfect grouping coherence, no possibility of drift between old and new state.
+
+```sh
+# 1. Add her snowflake to USER_IDS in .env
+USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
+
+# 2. Wipe Postgres (drops public + drizzle schemas, re-applies migrations)
+pnpm cli reset --yes
+
+# 3. Wipe Qdrant collections (delete points, keep collection schema)
+KEY=$(grep ^QDRANT_API_KEY .env | cut -d= -f2)
+URL=$(grep ^QDRANT_URL .env | cut -d= -f2)
+curl -sS -X POST "$URL/collections/ninshubur_messages/points/delete" \
+  -H "api-key: $KEY" -H "Content-Type: application/json" \
+  -d '{"filter": {"must_not": []}}'
+curl -sS -X POST "$URL/collections/ninshubur_groups/points/delete" \
+  -H "api-key: $KEY" -H "Content-Type: application/json" \
+  -d '{"filter": {"must_not": []}}'
+
+# 4. Re-walk Discord from scratch (USER_IDS now includes the new Priestess)
+pnpm cli backfill
+
+# 5. Run the analysis pipeline from scratch
+pnpm cli analyze taxonomy --sample 200      # Phase A
+pnpm cli analyze tag      --limit 50000     # Phase B
+pnpm cli analyze group    --window 15       # Phase C
+pnpm cli analyze embed    --scope all       # Phase D
+
+# 6. Verify
+pnpm cli analyze status
+pnpm cli rag query "what does the Temple teach about Inanna?"
+```
+
+**What you lose:**
+
+- The existing taxonomy slugs may shift slightly. Haiku samples 200 random messages each time, and the names it picks can vary across runs. If any external tools pin to specific slugs (e.g. `--category greeting_farewell`), update them after the new taxonomy lands.
+- All historical `llm_jobs` audit rows (job timing, errors, params) are wiped — you lose the run history.
+- All embedding work has to be redone (costs ~$0.34 in Voyage charges).
+
+**Estimated cost / time (reset):**
+
+| | |
+|---|---|
+| Wall-clock | ~30–60 min |
+| Anthropic + Voyage cost | ~$3–12 |
+| What it preserves | Nothing in the database (but the code, prompts, and `.env` are untouched) |
+| What it adds | A fully consistent archive across all Priestesses, fresh taxonomy |
+
+### 🌹 The honest comparison
+
+| | **Path A (Incremental)** | **Path B (Reset)** |
+|---|---|---|
+| Wall-clock | 5–15 min | 30–60 min |
+| API cost | ~$1–5 | ~$3–12 |
+| Mental complexity | medium (multiple commands + grouping caveat) | low (one canonical sequence) |
+| Taxonomy continuity | preserved | new taxonomy generated |
+| `llm_jobs` audit history | preserved | wiped |
+| Grouping coherence around new messages | imperfect (new messages form solo groups) | perfect (Haiku considers all messages together) |
+| Risk of orphaned state | non-zero (Qdrant points stay if not cleaned manually) | zero |
+| Best for | one new Priestess on a stable archive | multiple Priestesses, major changes, perfectionism |
+
+### 🌹 Removing a Priestess (revoking consent)
+
+When a Priestess revokes consent or leaves the order, Ninshubur should stop archiving her *and* delete her existing data from every store.
+
+There are two paths here too — incremental and reset — but the **reset path is strongly recommended for revocations** because it gives you a clean privacy guarantee with zero risk of orphaned state in Qdrant or stale Postgres rows.
+
+#### 🌷 Path A — Reset (recommended for revocation)
+
+Same as Path B above for adding, but with her ID **removed** from `USER_IDS` first:
+
+```sh
+# 1. Remove her ID from USER_IDS in .env
+USER_IDS=256628435454132225,1466578281774972939   # her ID removed
+
+# 2. Wipe Postgres and Qdrant — see Path B above for the commands
+
+# 3. Re-walk + re-analyze without her
+pnpm cli backfill
+pnpm cli analyze taxonomy --sample 200
+pnpm cli analyze tag      --limit 50000
+pnpm cli analyze group    --window 15
+pnpm cli analyze embed    --scope all
+```
+
+After this completes, **no trace of her words exists** in any system Ninshubur owns — Postgres, Qdrant, or the live cache. (The original Discord messages of course still exist on Discord's servers; revocation here means revoking *Ninshubur's* archive, not Discord's.)
+
+#### 🌷 Path B — Surgical (faster, but leaves edges to clean)
+
+If you want a faster revocation and accept the cleanup steps:
+
+```sh
+# 1. Remove her snowflake from USER_IDS
+# 2. Restart the bot — no new messages from her will be archived
+
+# 3. Delete her existing messages (cascades to attachments, reactions,
+#    message_categories, message_group_members)
+PGPASSWORD=... psql ... -c "
+  DELETE FROM messages WHERE author_id = '<her-snowflake>';
+  DELETE FROM users    WHERE id = '<her-snowflake>';
+"
+
+# 4. Delete her Qdrant points (uses payload filter on author_id —
+#    this works for the messages collection; group points may still
+#    contain her messages in their summary text)
+KEY=$(grep ^QDRANT_API_KEY .env | cut -d= -f2)
+URL=$(grep ^QDRANT_URL .env | cut -d= -f2)
+curl -sS -X POST "$URL/collections/ninshubur_messages/points/delete" \
+  -H "api-key: $KEY" -H "Content-Type: application/json" \
+  -d '{"filter": {"must": [{"key": "author_id", "match": {"value": "<her-id>"}}]}}'
+
+# 5. Delete her embedding bookkeeping (otherwise re-runs see ghost rows)
+PGPASSWORD=... psql ... -c "
+  DELETE FROM embeddings
+  WHERE scope_type = 'message'
+    AND scope_id NOT IN (SELECT id::text FROM messages);
+"
+
+# 6. (Optional) Re-run Phase C + D for affected channels so groups
+#    that contained her messages get re-bundled without her
+```
+
+This is the fast path but leaves potential for edge cases — group points might still contain references to her in their summary text. **Only use Path B if you're confident the Priestess is okay with potentially-imperfect cleanup.** For a hard privacy guarantee, use Path A (reset).
 
 ✦ ─────────────────────────────────── ✦
 
@@ -887,6 +1072,18 @@ These are organized into ~10 purpose categories (greeting, lesson, instruction, 
 If you find a bug, have an idea for a new query, or want to revoke consent for any reason, open an issue or talk to Jenova. The code is small enough to read end-to-end in an afternoon, the schema is intentionally legible, and every CLI command has a `--help` flag.
 
 May Inanna's light guide your work, may your words be preserved as they deserve, and may the archive serve the Temple for many seasons. ✨
+
+✦ ─────────────────────────────────── ✦
+
+## ⚖️ License
+
+Released under the [MIT License](LICENSE) — see the `LICENSE` file in the repository root for the full terms.
+
+> **In plain language:** you may copy, modify, redistribute, and use this code for any purpose (personal, commercial, or otherwise) at no cost, provided the copyright notice and license text travel with it. There is **no warranty** — the software is provided as-is.
+
+The license covers the **code** of Ninshubur. The Temple's archive content (messages, lessons, teachings — the data Ninshubur gathers and embeds) belongs to the High Priestesses who authored it and is **not** licensed by this project.
+
+Copyright © 2026 Jenova Marie.
 
 <div align="center">
 

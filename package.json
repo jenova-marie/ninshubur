@@ -2,7 +2,9 @@
   "name": "ninshubur",
   "version": "0.1.0",
   "private": true,
-  "description": "Discord.js forum scraper bot",
+  "description": "Discord scraper + RAG pipeline for the Temple of Inanna's Light",
+  "license": "MIT",
+  "author": "Jenova Marie <jenova-marie@pm.me>",
   "type": "module",
   "engines": {
     "node": ">=22"
