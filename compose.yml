@@ -1,0 +1,87 @@
+# Docker Swarm-friendly stack for ninshubur.
+# Deploy with:
+#   docker stack deploy -c compose.yml ninshubur
+#
+# Secrets are sourced from external Docker secrets so this file can be
+# committed safely. Create them once before deploying:
+#   printf '%s' "$DISCORD_TOKEN" | docker secret create ninshubur_discord_token -
+#   printf '%s' "$DATABASE_URL"  | docker secret create ninshubur_database_url -
+
+services:
+  bot:
+    image: ninshubur:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_GUILD_IDS: ${DISCORD_GUILD_IDS:-}
+      FORUM_CHANNEL_IDS: ${FORUM_CHANNEL_IDS:-}
+      BACKFILL_PAGE_SIZE: "100"
+      ARCHIVE_SWEEP_INTERVAL_MS: "900000"
+      DISCORD_TOKEN_FILE: /run/secrets/ninshubur_discord_token
+      DATABASE_URL_FILE: /run/secrets/ninshubur_database_url
+    secrets:
+      - ninshubur_discord_token
+      - ninshubur_database_url
+    depends_on:
+      - postgres
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 0
+      update_config:
+        parallelism: 1
+        order: stop-first
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks:
+      - ninshubur
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ninshubur
+      POSTGRES_USER: ninshubur
+      POSTGRES_PASSWORD_FILE: /run/secrets/ninshubur_postgres_password
+    volumes:
+      - ninshubur-pg-data:/var/lib/postgresql/data
+    secrets:
+      - ninshubur_postgres_password
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ninshubur -d ninshubur"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ninshubur
+
+volumes:
+  ninshubur-pg-data:
+    driver: local
+
+networks:
+  ninshubur:
+    driver: overlay
+    attachable: true
+
+secrets:
+  ninshubur_discord_token:
+    external: true
+  ninshubur_database_url:
+    external: true
+  ninshubur_postgres_password:
+    external: true
