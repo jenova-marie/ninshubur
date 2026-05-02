@@ -79,7 +79,47 @@ describe("taxonomy schemas", () => {
   });
 });
 
-describe("message tag schema", () => {
+describe("buildMessageTagSchema (runtime enum)", () => {
+  it("accepts only slugs from the locked taxonomy plus __novel__", async () => {
+    const { buildMessageTagSchema } = await import("../src/analyze/schema.ts");
+    const schema = buildMessageTagSchema(["greeting_farewell", "lesson"]);
+
+    expect(
+      schema.safeParse({
+        categories: [{ slug: "greeting_farewell", confidence: 0.9 }],
+        novelHint: null,
+      }).success,
+    ).toBe(true);
+
+    expect(
+      schema.safeParse({
+        categories: [{ slug: "__novel__", confidence: 0.5 }],
+        novelHint: "feels like an apology",
+      }).success,
+    ).toBe(true);
+
+    expect(
+      schema.safeParse({
+        categories: [{ slug: "gratitude", confidence: 0.8 }],
+        novelHint: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("throws if the taxonomy is empty", async () => {
+    const { buildMessageTagSchema } = await import("../src/analyze/schema.ts");
+    expect(() => buildMessageTagSchema([])).toThrow(/empty taxonomy/);
+  });
+
+  it("dedupes when __novel__ is somehow already in the input", async () => {
+    const { buildMessageTagSchema } = await import("../src/analyze/schema.ts");
+    expect(() =>
+      buildMessageTagSchema(["greeting", "lesson", "__novel__"]),
+    ).not.toThrow();
+  });
+});
+
+describe("message tag schema (static, regex-based)", () => {
   it("accepts 1..5 categories with confidence", () => {
     const result = messageTagSchema.safeParse({
       categories: [

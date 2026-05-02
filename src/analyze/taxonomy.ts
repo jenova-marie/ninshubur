@@ -160,4 +160,40 @@ export async function categoryIdsBySlug(): Promise<Map<string, string>> {
   return new Map(rows.map((r) => [r.slug, r.id]));
 }
 
+export const NOVEL_SLUG = "__novel__";
+
+/**
+ * Ensure the special `__novel__` category exists in the taxonomy and
+ * return its id. Inserted by the tag phase the first time a message
+ * either explicitly receives `__novel__` from Haiku OR slips an
+ * out-of-enum slug past Anthropic's grammar enforcement. The
+ * resulting `message_categories` row marks the message as
+ * "processed, no fit found", so subsequent `analyze tag` runs skip
+ * it via the existing `NOT EXISTS` filter — no perpetual rework.
+ */
+export async function ensureNovelCategory(): Promise<string> {
+  const existing = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(sql`${categories.slug} = ${NOVEL_SLUG}`)
+    .limit(1);
+  const found = existing[0];
+  if (found) return found.id;
+
+  const [created] = await db
+    .insert(categories)
+    .values({
+      slug: NOVEL_SLUG,
+      name: "Novel (no taxonomy fit)",
+      description:
+        "Marker category for messages where Haiku could not place the content in any category from the locked taxonomy. Inserted by `analyze tag` so future runs skip these messages instead of re-evaluating them. Useful as a filter target when refining the taxonomy.",
+      source: "system",
+    })
+    .returning({ id: categories.id });
+  if (!created) {
+    throw new Error("failed to create __novel__ category");
+  }
+  return created.id;
+}
+
 void messages; // keep export side-effect free; messages import is for future joins

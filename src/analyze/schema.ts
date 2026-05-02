@@ -78,7 +78,18 @@ export const taxonomyCurationSchema = z.object({
     .describe("The final, deduplicated taxonomy."),
 });
 
-/** Phase B: per-message tagging. */
+/**
+ * Phase B: per-message tagging.
+ *
+ * The static schema (regex slug) exists so test code and the
+ * documentation surface stay simple — it allows any well-formed
+ * slug. The runtime tagging path uses `buildMessageTagSchema(slugs)`
+ * below to pin the slug field to a Zod enum of the *actual* locked
+ * taxonomy slugs plus `__novel__`. Enum becomes a JSON-Schema
+ * `enum` constraint when sent to Anthropic, which their grammar-
+ * constrained sampler enforces hard — Haiku literally cannot emit
+ * a slug outside the list.
+ */
 export const messageTagSchema = z.object({
   categories: z
     .array(
@@ -100,6 +111,54 @@ export const messageTagSchema = z.object({
     .nullable()
     .describe("If any slug is '__novel__', describe what new category would fit."),
 });
+
+/**
+ * Build a per-run version of the message-tag schema that pins the
+ * slug field to a Zod enum of the locked taxonomy slugs plus the
+ * `__novel__` escape hatch. Anthropic's structured-outputs grammar
+ * enforcement turns this enum into a hard constraint — Haiku
+ * cannot produce a slug outside the list, so the "haiku produced
+ * an unknown slug" branch in tag.ts becomes unreachable.
+ *
+ * Slugs are normalised to canonical snake_case before being added
+ * to the enum; the runtime caller is expected to have already
+ * loaded these from the categories table where they're already
+ * canonical.
+ */
+export function buildMessageTagSchema(canonicalSlugs: readonly string[]) {
+  if (canonicalSlugs.length === 0) {
+    throw new Error(
+      "cannot build messageTagSchema with empty taxonomy — run `analyze taxonomy` first",
+    );
+  }
+  const allowed = [...new Set([...canonicalSlugs, "__novel__"])];
+  // z.enum requires a non-empty tuple. The cast satisfies TS without
+  // changing runtime behaviour — `allowed` is guaranteed non-empty
+  // by the check above.
+  const slugEnum = z.enum(allowed as [string, ...string[]]);
+
+  return z.object({
+    categories: z
+      .array(
+        z.object({
+          slug: slugEnum.describe(
+            "Must be one of the locked taxonomy slugs OR the literal '__novel__'.",
+          ),
+          confidence: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe("Subjective 0-1 confidence in this assignment."),
+        }),
+      )
+      .min(1)
+      .max(5),
+    novelHint: z
+      .string()
+      .nullable()
+      .describe("If any slug is '__novel__', describe what new category would fit."),
+  });
+}
 
 /** Phase C: window-batch grouping. */
 export const groupWindowSchema = z.object({
