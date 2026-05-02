@@ -6,9 +6,11 @@
 
 ### *The Faithful Messenger of the Temple of Inanna's Light*
 
-*A Discord scribe with strict, narrow attention: she preserves only the words of the High Priestesses (and Jenova, for context), gathered into PostgreSQL, organized by Claude Haiku, and made searchable through Voyage AI embeddings stored in Qdrant.*
+*A small command-line scribe who, when summoned, gathers the words of the High Priestesses (and Jenova, for context) into PostgreSQL, organizes them with Claude Haiku, and makes them searchable through Voyage AI embeddings stored in Qdrant.*
 
-**🕊️ Ninshubur is consent-first by design.** She does not scrape the congregation — only the explicitly-listed sacred speakers in `USER_IDS`.
+**🕊️ Ninshubur is consent-first by design.** She archives only the explicitly-listed sacred speakers in `USER_IDS` — never the wider congregation.
+
+**⏸️ Ninshubur is not a live monitor.** She is a CLI tool. She does not sit in the Temple's guild watching messages stream by, does not subscribe to gateway events, does not run in the background. She only reads Discord when Jenova explicitly types a command like `pnpm cli backfill`. Between invocations she is asleep — no process, no connection, no listening.
 
 ✦ ─────────────────────────────────── ✦
 
@@ -19,7 +21,7 @@
 
 > 📜 **About the cuneiform.** In Sumerian writing, the names of deities are prefixed with **𒀭** — the *dingir* sign, a divinity-determinative that marks the word that follows as a god or goddess. So `𒀭𒊩𒋚` reads: *dingir* + *NIN* (lady) + *ŠUBUR* — "the goddess Lady-Šubur." When you see `𒀭ninshubur` in this document, the prefix is doing the same job: declaring the bot's namesake a goddess.
 
-In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of Inanna — the one who remembers what was said by the goddess, who fetches help when Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — but it listens narrowly, never gathering the speech of the wider congregation.
+In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of Inanna — the one who remembers what was said by the goddess, who fetches help when Inanna is in trouble, who keeps the record of the high priestess's own words. This bot carries her name because it does the same focused work for the Temple of Inanna's Light: it preserves the words of the **High Priestesses** so their teachings can be recalled, studied, and referenced — and it does so narrowly, never gathering the speech of the wider congregation.
 
 **Why narrow?** This is a consent-respecting design. The Temple's congregants did not sign up to have every message archived and searched. The High Priestesses *did* — their lessons, sermons, and answers are a body of teaching the Temple wants to preserve. `USER_IDS` is the boundary that enforces this distinction at the moment of `upsertMessage()` — every other message is silently dropped and never written to disk.
 
@@ -45,28 +47,27 @@ In Sumerian myth, **𒀭Ninshubur** is the loyal *sukkal* (vizier, messenger) of
 
 ## 🪷 What This Bot Does
 
-The work happens in **two sacred phases**, both bounded by a strict consent allowlist:
+The work happens in **two sacred phases**, both bounded by a strict consent allowlist and **both invoked manually from the command line**:
 
 ```
    ┌─────────────────────┐         ┌─────────────────────────┐
    │   Phase I — Gather  │   ───►  │   Phase II — Understand │
    │                     │         │                         │
-   │   Listen + scrape   │         │   Tag, group, embed,    │
-   │   Priestess words   │         │   answer questions      │
-   │   into PostgreSQL   │         │   via RAG               │
+   │   Scrape Priestess  │         │   Tag, group, embed,    │
+   │   words into        │         │   answer questions      │
+   │   PostgreSQL        │         │   via RAG               │
    └─────────────────────┘         └─────────────────────────┘
-        Phase I is live              Phase II is on-demand
-        (the bot stays running)      (you run CLI commands)
+        Both phases are entirely on-demand.
+        Ninshubur is a CLI tool — there is no daemon,
+        no live listener, no background process.
+        She acts only when you invoke her.
 
    Both phases respect USER_IDS — only the listed speakers are persisted.
 ```
 
-**Phase I — The Scrape.** Ninshubur logs into the Temple's Discord guild as a bot, walks every configured channel (text, voice, forum, media), and writes **only messages authored by users listed in `USER_IDS`** into PostgreSQL via Drizzle ORM. Every other message — congregant chatter, replies, casual conversation — is silently dropped at `upsertMessage()` time, before any data is written to disk. She does this two ways:
+**Phase I — The Scrape.** When Jenova runs `pnpm cli backfill`, Ninshubur briefly logs into Discord, walks the configured channels' history through Discord's REST API, and writes **only messages authored by users listed in `USER_IDS`** into PostgreSQL via Drizzle ORM. Any message from someone not in `USER_IDS` is filtered out during the scrape and never persisted. When the backfill completes, Ninshubur disconnects and exits — the next invocation is a brand-new login.
 
-- **Backfill** — historical sweep that walks backward through every channel, examining each message and persisting only the ones from listed speakers
-- **Live** — gateway events (`messageCreate`, `messageUpdate`, `messageDelete`, `threadCreate`, etc.) keep the archive current; same allowlist applies in real time
-
-The result is an archive of the High Priestesses' teaching corpus — their morning greetings, their lessons, their answers to questions, their personal reflections — without any record of who *asked* the question or who *replied* to whom (unless the replier is also a listed Priestess).
+The result is an archive of the High Priestesses' teaching corpus — their morning greetings, their lessons, their answers to questions, their personal reflections — captured at the moments Jenova chooses to run a scrape. There is no record of who *asked* a question or who *replied* to whom (unless the replier is also a listed Priestess), and no record at all between scrapes.
 
 **Phase II — The Analysis.** Once messages are in PostgreSQL, the analysis pipeline organizes them so you can actually *use* the archive:
 
@@ -85,7 +86,7 @@ The end result: you can ask *"what does the Temple teach about Ishtaritism?"* an
 | Layer | Technology | Why |
 |---|---|---|
 | **Runtime** | Node.js 22 + TypeScript (ESM, native `.ts` via `tsx`) | No build step, runs `.ts` files directly |
-| **Discord** | discord.js v14 | Official-quality wrapper, gateway + REST |
+| **Discord** | discord.js v14 | Official-quality REST client (used during scrapes only) |
 | **Database** | PostgreSQL 16 + Drizzle ORM | Source of truth for all messages |
 | **Validation** | Zod (v3 + v4) + drizzle-zod | Schema-first env, payload, and tool-output validation |
 | **CLI** | commander | All operations exposed as `pnpm cli <subcommand>` |
@@ -103,16 +104,18 @@ The end result: you can ask *"what does the Temple teach about Ishtaritism?"* an
 
 > *For your forgetful self, queen. Print this and pin it.* 💅
 
-### Daily operations
+### Common operations (all manual)
 
 ```sh
-# Run the bot live (listens on the gateway, picks up new messages)
-pnpm dev                        # watches for file changes, ideal for hacking
-pnpm start                      # production-style, no watch
-
 # Health check (Postgres + Discord both reachable?)
 pnpm cli health
+
+# Refresh the archive — only when you want to catch up to recent messages
+pnpm cli backfill                       # incremental sweep since last cursor
+pnpm cli backfill --reset               # full re-walk from message zero
 ```
+
+> Ninshubur exits when each command finishes. Nothing is left running.
 
 ### Setup & schema
 
@@ -218,11 +221,11 @@ pnpm cli channels
 
 # 8. Pick the channels you want, list them in CHANNEL_IDS in .env
 
-# 9. First scrape!
+# 9. First scrape — this is the only way data ever enters the archive
 pnpm cli backfill
 
-# 10. Run the bot live to keep the archive fresh
-pnpm dev
+# 10. Whenever you want a fresh sweep later, just run backfill again.
+#     Each invocation logs in, scrapes, and exits — there's no daemon.
 ```
 
 ✦ ─────────────────────────────────── ✦
@@ -251,7 +254,7 @@ To create these:
 
 ### 🌹 Allowlist filters — the consent boundary
 
-**This is the most important section in this file.** These three settings together define exactly what Ninshubur listens to and writes down. Get them wrong and you'll either capture too much (a privacy violation) or too little (an empty archive).
+**This is the most important section in this file.** These three settings together define exactly what Ninshubur scrapes and writes down when you run a backfill. Get them wrong and you'll either capture too much (a privacy violation) or too little (an empty archive).
 
 ```sh
 # Required in spirit: comma-separated guild IDs the bot will respond to.
@@ -305,7 +308,7 @@ A blank `USER_IDS` is interpreted as "every author allowed" — which is **conve
 
 To find IDs in Discord: enable Developer Mode in **User Settings → Advanced**, then right-click any guild / channel / user → **Copy ID**.
 
-> 👑 **Adding or removing a Priestess** is a multi-step workflow that touches `.env`, the bot, the database, and the vector store. The full procedure (with two paths — incremental vs reset — and the revocation flow) lives in its own section below: [👑 Adding (or Removing) a Priestess](#-adding-or-removing-a-priestess).
+> 👑 **Adding or removing a Priestess** is a multi-step workflow that touches `.env`, the database, and the vector store. The full procedure (with two paths — incremental vs reset — and the revocation flow) lives in its own section below: [👑 Adding (or Removing) a Priestess](#-adding-or-removing-a-priestess).
 
 ### 🌹 PostgreSQL
 
@@ -374,7 +377,7 @@ NODE_ENV=development             # development | test | production
 
 ## 🏛️ Phase I — The Scrape (Gathering)
 
-This is the part that turns Discord into an archive of the High Priestesses' teaching. The bot listens to the gateway in real time *and* walks history backwards in batch — but **only persists messages whose author is in `USER_IDS`**.
+This is the part that turns Discord into an archive of the High Priestesses' teaching. **It runs only when invoked from the command line.** Each invocation logs into Discord, walks the configured channels' history through the REST API, persists messages whose author is in `USER_IDS`, and disconnects. There is no continuous listener and no background process between runs.
 
 ### How it picks what to scrape
 
@@ -417,18 +420,9 @@ pnpm cli channels --json | jq      # machine-readable for piping
 
 Each row shows the channel `[Type]`, ID, name, and a ⭐ if it's currently in `CHANNEL_IDS`.
 
-### The actual scraping
+### The actual scraping — `pnpm cli backfill`
 
-#### Live mode (the daemon)
-
-```sh
-pnpm dev                           # tsx watch — restarts on file changes
-pnpm start                         # plain run, no watch
-```
-
-The bot stays connected to the Discord gateway and writes new messages to Postgres as they arrive. On startup it also walks every tracked channel for any messages it might have missed while offline (incremental backfill).
-
-#### One-off backfills
+Every scrape happens via the `backfill` subcommand. Ninshubur logs in, walks the configured channels through Discord's REST API, and exits when finished. There's no idle state, no listener, no "is the bot online?" question — between runs, Ninshubur is simply not running.
 
 ```sh
 # Walk every channel that matches the .env allowlist
@@ -468,12 +462,12 @@ When a message survives all three filter rings (guild → channel → author), i
 - Rows in `reactions` aggregated per emoji
 - For thread messages, `messages.thread_id` is set; `channel_id` is the *parent* channel
 
-When a message **fails** the `USER_IDS` ring (the most common case in production):
+When a message **fails** the `USER_IDS` ring during a scrape (the common case for any non-Priestess speaker):
 
 - Nothing is written to `messages`, `attachments`, `reactions`, or `users`
 - The author's user record is *not* created — congregants who never speak in the archive never appear in the database at all
-- The cursor in `scrape_state` still advances past this message id so we don't re-evaluate it on the next backfill pass
-- A debug log line *may* be emitted depending on `LOG_LEVEL`
+- The cursor in `scrape_state` still advances past this message id so we don't re-evaluate it on the next backfill
+- A debug log line *may* be emitted depending on `LOG_LEVEL` — this only appears in your terminal during a scrape, never persisted
 
 Forwarded messages (`HAS_SNAPSHOT` flag = `1 << 14`) are special: the visible message has empty `content`, but the original lives in `message_snapshots[]`. The scraper unwraps these so the original text is searchable. See `src/scraper/store.ts::extractSnapshots()`.
 
@@ -535,7 +529,7 @@ The loader is [`src/prompts/index.ts`](src/prompts/index.ts) — it reads each f
 
 > ✨ **Why markdown?** The prompts include rules, heuristics, and worked examples — formats that are much easier to maintain in markdown than in escaped TypeScript strings. Haiku reads markdown natively (heading levels, bold, code fences all carry meaning to it), so the file you see is *exactly* what the model sees.
 
-> 💡 **Editing in production.** The live daemon (`pnpm dev` / `pnpm start`) caches prompts in-memory, so an edit during a run won't be picked up until the bot restarts. The on-demand `pnpm cli analyze ...` commands always start a fresh process and read fresh prompts.
+> 💡 **Editing prompts.** Every `pnpm cli analyze ...` invocation is a fresh process that reads each prompt file from disk on first use. So your edits to the markdown files take effect on the very next run — no restart needed because there is nothing to restart.
 
 ### 🌷 Phase A — Taxonomy (discover → curate → lock)
 
@@ -731,7 +725,7 @@ It does **not** clear Qdrant collections. If you reset Postgres, also delete and
 
 ## 👑 Adding (or Removing) a Priestess
 
-When a new High Priestess joins the order and consents to having her teaching archived — or when an existing Priestess revokes consent — Ninshubur needs to know. The configuration change is just two lines in `.env`, but capturing (or removing) her **historical** messages from the archive takes a multi-step workflow because the data lives in three places: Postgres, Qdrant, and the live Discord gateway state.
+When a new High Priestess joins the order and consents to having her teaching archived — or when an existing Priestess revokes consent — Ninshubur needs to know. The configuration change is just two lines in `.env`. Capturing (or removing) her **historical** messages then takes a multi-step workflow because the data lives in two places: PostgreSQL and Qdrant.
 
 This section walks through both directions.
 
@@ -748,11 +742,8 @@ Best when you want to **preserve the existing taxonomy, tags, and groups** — o
 #    Right-click her name in Discord → Copy User ID
 USER_IDS=256628435454132225,1466578281774972939,<NEW_ID>
 
-# 2. Restart the live bot so the new allowlist takes effect
-#    (Ctrl-C the running daemon, then start it again)
-pnpm dev    # or pnpm start
-
-# 3. Re-walk every tracked channel from message zero
+# 2. Re-walk every tracked channel from message zero. There is no live
+#    bot to restart — Ninshubur reads .env fresh on every invocation.
 #    --reset clears the cursor so the historical archive is re-evaluated
 #    against the new USER_IDS. Existing messages get idempotently
 #    re-touched; new Priestess's messages get inserted for the first time.
@@ -870,7 +861,7 @@ pnpm cli analyze group    --window 15
 pnpm cli analyze embed    --scope all
 ```
 
-After this completes, **no trace of her words exists** in any system Ninshubur owns — Postgres, Qdrant, or the live cache. (The original Discord messages of course still exist on Discord's servers; revocation here means revoking *Ninshubur's* archive, not Discord's.)
+After this completes, **no trace of her words exists** in any system Ninshubur owns — Postgres or Qdrant. (The original Discord messages of course still exist on Discord's servers; revocation here means revoking *Ninshubur's* archive, not Discord's.)
 
 #### 🌷 Path B — Surgical (faster, but leaves edges to clean)
 
@@ -878,16 +869,17 @@ If you want a faster revocation and accept the cleanup steps:
 
 ```sh
 # 1. Remove her snowflake from USER_IDS
-# 2. Restart the bot — no new messages from her will be archived
+#    (No bot restart needed — Ninshubur reads .env fresh on every run.
+#    The next time you invoke a scrape, her messages will be excluded.)
 
-# 3. Delete her existing messages (cascades to attachments, reactions,
+# 2. Delete her existing messages (cascades to attachments, reactions,
 #    message_categories, message_group_members)
 PGPASSWORD=... psql ... -c "
   DELETE FROM messages WHERE author_id = '<her-snowflake>';
   DELETE FROM users    WHERE id = '<her-snowflake>';
 "
 
-# 4. Delete her Qdrant points (uses payload filter on author_id —
+# 3. Delete her Qdrant points (uses payload filter on author_id —
 #    this works for the messages collection; group points may still
 #    contain her messages in their summary text)
 KEY=$(grep ^QDRANT_API_KEY .env | cut -d= -f2)
@@ -896,14 +888,14 @@ curl -sS -X POST "$URL/collections/ninshubur_messages/points/delete" \
   -H "api-key: $KEY" -H "Content-Type: application/json" \
   -d '{"filter": {"must": [{"key": "author_id", "match": {"value": "<her-id>"}}]}}'
 
-# 5. Delete her embedding bookkeeping (otherwise re-runs see ghost rows)
+# 4. Delete her embedding bookkeeping (otherwise re-runs see ghost rows)
 PGPASSWORD=... psql ... -c "
   DELETE FROM embeddings
   WHERE scope_type = 'message'
     AND scope_id NOT IN (SELECT id::text FROM messages);
 "
 
-# 6. (Optional) Re-run Phase C + D for affected channels so groups
+# 5. (Optional) Re-run Phase C + D for affected channels so groups
 #    that contained her messages get re-bundled without her
 ```
 
@@ -956,44 +948,41 @@ llm_jobs                    ←  audit log for analyze runs
 
 ✦ ─────────────────────────────────── ✦
 
-## 🚀 Deployment to Production
+## 🚀 Running From Docker (optional)
 
-The production deployment is Docker Swarm via `compose.yml`. Secrets come from `docker secret create`.
+Ninshubur is **not deployed as a service** — there is no daemon to leave running. The Dockerfile in this repo exists only as a convenience for running CLI commands inside a container, e.g. from CI, a one-shot Kubernetes Job, or a remote machine that already has access to your Postgres + Qdrant + secrets.
 
 ```sh
-# 1. Create secrets once (per swarm node)
-printf '%s' "$DISCORD_TOKEN"  | docker secret create ninshubur_discord_token -
-printf '%s' "$DATABASE_URL"   | docker secret create ninshubur_database_url -
-printf '%s' "$PG_PASSWORD"    | docker secret create ninshubur_postgres_password -
-
-# 2. Build the image
+# Build the image
 docker build -t ninshubur:latest .
 
-# 3. Deploy
-docker stack deploy -c compose.yml ninshubur
+# Run any CLI subcommand inside the container
+docker run --rm \
+  --env-file .env \
+  ninshubur:latest pnpm cli backfill --channel <id>
+
+docker run --rm --env-file .env ninshubur:latest pnpm cli analyze tag --limit 5000
+docker run --rm --env-file .env ninshubur:latest pnpm cli health
 ```
 
-The image runs `pnpm start` (i.e. `tsx`) — there is no compiled `dist` shipped. This is intentional: the runtime layer is small, and `tsx` strips types on the fly.
+The container exits as soon as the CLI command exits. Nothing stays alive between invocations — same model as running on your laptop, just with a containerized environment.
 
-Override the command at run time for one-off tasks:
+### Required Discord application setup
 
-```sh
-docker run --rm ninshubur:latest pnpm cli backfill --channel <id>
-docker run --rm ninshubur:latest pnpm cli analyze tag --limit 5000
-docker run --rm ninshubur:latest pnpm cli health
-```
+For Ninshubur to log in (briefly, during a scrape) and read messages, the Discord application needs:
 
-### Required Discord intents
+- **Message Content Intent** enabled in **Developer Portal → Bot → Privileged Gateway Intents**
+- The bot account invited to your guild with `View Channels` + `Read Message History` permissions on the channels you want scraped
 
-The bot needs `MessageContent` (privileged) and `GuildMessageReactions`. Toggle both in **Developer Portal → Bot → Privileged Gateway Intents** before inviting.
+The intent and invite are still required even though Ninshubur doesn't keep a gateway connection open — the REST API uses the same authorization as the gateway would, and Discord requires the privileged intent declaration regardless of how the data is fetched.
 
 ### Invite URL template
 
 ```
-https://discord.com/oauth2/authorize?client_id=<DISCORD_CLIENT_ID>&permissions=274877959168&scope=bot
+https://discord.com/oauth2/authorize?client_id=<DISCORD_CLIENT_ID>&permissions=66560&scope=bot
 ```
 
-The permission integer `274877959168` grants: View Channels, Read Message History, Send Messages in Threads. Adjust upward if you want the bot to post (e.g. `381173504064` adds Send Messages everywhere).
+The permission integer `66560` grants: View Channels + Read Message History — read-only, no posting. Ninshubur never sends messages.
 
 ✦ ─────────────────────────────────── ✦
 
@@ -1056,9 +1045,25 @@ Working as designed. `pnpm cli reset --yes` to confirm. Will still refuse if `NO
 
 If you're reviewing this work — welcome, beloved.
 
-This bot is a small offering toward keeping the **High Priestesses' teaching** safe and recallable. It is built around an explicit consent boundary: only the speakers listed in `USER_IDS` are archived. Today that's Siri.system and Jenova. Adding a new Priestess is a deliberate, two-line change to `.env` (and revoking is just as easy — see *Removing a Priestess* in the env section above).
+This bot is a small offering toward keeping the **High Priestesses' teaching** safe and recallable. It is built around two important boundaries you should understand before reading further:
 
-The wider congregation's messages are **never written to disk** — Ninshubur sees them stream past on the gateway, checks the author against the allowlist, and drops them before any database write. If you ever wonder *"could the bot have my message stored?"* — the answer is no, unless you are explicitly listed in `USER_IDS`.
+### 🌷 Boundary 1 — Consent
+
+Only the speakers listed in `USER_IDS` are archived. Today that's Siri.system and Jenova. Adding a new Priestess is a deliberate, two-line change to `.env` (and revoking is just as easy — see [👑 Adding (or Removing) a Priestess](#-adding-or-removing-a-priestess) above).
+
+The wider congregation's messages are **never written to disk**. During a scrape, Ninshubur reads each message through Discord's REST API, checks the author against the allowlist, and discards anything from non-listed speakers before it reaches Postgres. If you ever wonder *"could the bot have my message stored?"* — the answer is no, unless you are explicitly listed in `USER_IDS`.
+
+### 🌷 Boundary 2 — Scope of attention
+
+**Ninshubur is not a live monitor.** She is a CLI tool that Jenova invokes manually when she wants to refresh the archive. Between invocations Ninshubur does not run, does not connect to Discord, does not "watch" the guild. There is no listener, no daemon, no background process.
+
+A scrape happens like this:
+
+1. Jenova types `pnpm cli backfill` at her terminal
+2. Ninshubur logs into Discord, walks the configured channels' history via REST, persists qualifying messages, and exits
+3. Discord no longer sees a connection from Ninshubur. The Temple resumes its normal life.
+
+So Ninshubur is *not* witnessing the day-to-day of the Temple — she is more like a periodic transcription pass over chosen channels, run by Jenova at moments of her choosing. Anything you've said in the wider Temple between scrapes was never seen by her at all.
 
 What *is* preserved:
 - Your morning greetings to the congregation
