@@ -47,6 +47,7 @@ vi.mock("../src/analyze/tag.ts", () => ({ runTag: vi.fn() }));
 vi.mock("../src/analyze/group.ts", () => ({ runGroup: vi.fn() }));
 vi.mock("../src/analyze/embed.ts", () => ({ runEmbed: vi.fn() }));
 vi.mock("../src/rag/query.ts", () => ({ runRagQuery: vi.fn() }));
+vi.mock("../src/agent/archivist.ts", () => ({ runArchivist: vi.fn() }));
 
 let buildProgram: typeof import("../src/cli.ts").buildProgram;
 
@@ -64,6 +65,7 @@ describe("cli program", () => {
     const names = program.commands.map((cmd) => cmd.name()).sort();
     expect(names).toEqual([
       "analyze",
+      "ask",
       "backfill",
       "channels",
       "health",
@@ -73,6 +75,30 @@ describe("cli program", () => {
       "reset",
       "start",
     ]);
+  });
+
+  it("parses ask <question...> with --limit and --max-turns", () => {
+    const program = buildProgram();
+    program.exitOverride();
+    const ask = program.commands.find((c) => c.name() === "ask")!;
+    ask.action(() => {});
+    program.parse([
+      "node",
+      "ninshubur",
+      "ask",
+      "what",
+      "is",
+      "Ishtaritism",
+      "?",
+      "--limit",
+      "8",
+      "--max-turns",
+      "5",
+    ]);
+    const opts = ask.opts<{ limit: string; maxTurns: string }>();
+    expect(opts.limit).toBe("8");
+    expect(opts.maxTurns).toBe("5");
+    expect(ask.args).toEqual(["what", "is", "Ishtaritism", "?"]);
   });
 
   it("exposes the expected analyze subcommands", () => {

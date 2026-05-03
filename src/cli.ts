@@ -19,6 +19,7 @@ import { upsertChannel, upsertGuild } from "./scraper/store.ts";
 import { registerQueryCommand } from "./cli/queries.ts";
 import { registerAnalyzeCommand } from "./cli/analyze.ts";
 import { registerRagCommand } from "./cli/rag.ts";
+import { registerAskCommand } from "./cli/ask.ts";
 
 const VERSION = "0.1.0";
 
@@ -121,6 +122,7 @@ export function buildProgram(): Command {
   registerQueryCommand(program);
   registerAnalyzeCommand(program);
   registerRagCommand(program);
+  registerAskCommand(program);
 
   return program;
 }
