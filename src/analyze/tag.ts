@@ -242,7 +242,7 @@ export async function runTag(opts: TagOptions = {}): Promise<void> {
           tagged,
           novel: skippedNovel,
           errored,
-          "rate/min": Math.round(rate * 60),
+          "rate/sec": rate.toFixed(1),
           eta: `${Math.round(etaSec / 60)}m`,
         },
       });
@@ -279,6 +279,8 @@ export async function runTag(opts: TagOptions = {}): Promise<void> {
         completed += 1;
         // Update the progress bar on every completion (cheap), but
         // only emit the structured JSON log every `progressEvery`
+        const elapsedSec = Math.max(1, (Date.now() - startTime) / 1000);
+        const ratePerSec = completed / elapsedSec;
         renderProgress({
           processed: completed,
           total,
@@ -286,9 +288,8 @@ export async function runTag(opts: TagOptions = {}): Promise<void> {
             tagged,
             novel: skippedNovel,
             errored,
-            "rate/min": Math.round(
-              (completed / Math.max(1, (Date.now() - startTime) / 1000)) * 60,
-            ),
+            "rate/sec": ratePerSec.toFixed(1),
+            eta: `${Math.round((total - completed) / Math.max(0.001, ratePerSec) / 60)}m`,
           },
         });
         reportProgress();

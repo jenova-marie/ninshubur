@@ -207,6 +207,8 @@ export async function runGroup(opts: GroupOptions = {}): Promise<void> {
         await processWindow(job);
         completed += 1;
         // Live bar on stderr (TTY only)
+        const elapsedSec = Math.max(1, (Date.now() - startTime) / 1000);
+        const ratePerSec = completed / elapsedSec;
         renderProgress({
           processed: completed,
           total,
@@ -214,9 +216,8 @@ export async function runGroup(opts: GroupOptions = {}): Promise<void> {
             groups: totalGroups,
             messages: totalMessages,
             errored,
-            "rate/min": Math.round(
-              (completed / Math.max(1, (Date.now() - startTime) / 1000)) * 60,
-            ),
+            "rate/sec": ratePerSec.toFixed(1),
+            eta: `${Math.round((total - completed) / Math.max(0.001, ratePerSec) / 60)}m`,
           },
         });
         reportProgress();

@@ -10,6 +10,7 @@ import { logger } from "../logger.ts";
 import { embed } from "../llm/voyage.ts";
 import { ensureCollection, snowflakeToPointId, upsertPoints } from "../llm/qdrant.ts";
 import { withJob } from "./job.ts";
+import { endProgress, isInteractive, renderProgress } from "../util/progress.ts";
 
 export type EmbedScope = "all" | "messages" | "groups";
 
@@ -314,23 +315,119 @@ export async function runEmbed(opts: EmbedOptions = {}): Promise<void> {
 
     if (scope === "all" || scope === "messages") {
       const rows = await loadMessagesNeedingEmbedding(env.VOYAGE_MODEL, limit, force);
-      logger.info({ count: rows.length, force }, "embedding messages");
+      const total = rows.length;
+      logger.info({ count: total, force }, "embedding messages");
+
+      let processed = 0;
+      let embedded = 0;
+      let tokens = 0;
+      const startTime = Date.now();
+      const progressEveryBatch = 1; // batch is already 256 rows — log every batch
+
       // Voyage limits each request to 128 inputs; voyage.embed handles
       // chunking, but we still cap the total batch size to keep memory
       // pressure sane on huge corpora.
-      for (let i = 0; i < rows.length; i += 256) {
+      for (let i = 0; i < total; i += 256) {
         const slice = rows.slice(i, i + 256);
-        stats.push(await embedMessageBatch(slice, env.QDRANT_COLLECTION_MESSAGES));
+        const stat = await embedMessageBatch(slice, env.QDRANT_COLLECTION_MESSAGES);
+        stats.push(stat);
+        processed += slice.length;
+        embedded += stat.embedded;
+        tokens += stat.totalTokens;
+
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        const rate = elapsedSec > 0 ? processed / elapsedSec : 0;
+        const etaSec = rate > 0 ? (total - processed) / rate : 0;
+
+        renderProgress({
+          processed,
+          total,
+          extras: {
+            scope: "messages",
+            embedded,
+            tokens,
+            "rate/sec": rate.toFixed(1),
+            eta: `${Math.round(etaSec / 60)}m`,
+          },
+        });
+
+        // When attached to a TTY, the live bar is the human-facing
+        // signal — JSON lines on stdout would smear across it. When
+        // running unattended (CI, swarm logs, redirected output)
+        // there's no bar, so we emit the structured log instead.
+        if (!isInteractive) {
+          const batchIdx = Math.floor(i / 256) + 1;
+          if (batchIdx % progressEveryBatch === 0 || processed === total) {
+            logger.info(
+              {
+                scope: "messages",
+                processed,
+                total,
+                percent: Math.round((processed / total) * 100),
+                embedded,
+                tokens,
+                rateSec: Number(rate.toFixed(2)),
+                etaMin: Math.round(etaSec / 60),
+              },
+              "embed progress",
+            );
+          }
+        }
       }
+      endProgress();
     }
 
     if (scope === "all" || scope === "groups") {
       const rows = await loadGroupsNeedingEmbedding(env.VOYAGE_MODEL, limit, force);
-      logger.info({ count: rows.length, force }, "embedding groups");
-      for (let i = 0; i < rows.length; i += 256) {
+      const total = rows.length;
+      logger.info({ count: total, force }, "embedding groups");
+
+      let processed = 0;
+      let embedded = 0;
+      let tokens = 0;
+      const startTime = Date.now();
+
+      for (let i = 0; i < total; i += 256) {
         const slice = rows.slice(i, i + 256);
-        stats.push(await embedGroupBatch(slice, env.QDRANT_COLLECTION_GROUPS));
+        const stat = await embedGroupBatch(slice, env.QDRANT_COLLECTION_GROUPS);
+        stats.push(stat);
+        processed += slice.length;
+        embedded += stat.embedded;
+        tokens += stat.totalTokens;
+
+        const elapsedSec = (Date.now() - startTime) / 1000;
+        const rate = elapsedSec > 0 ? processed / elapsedSec : 0;
+        const etaSec = rate > 0 ? (total - processed) / rate : 0;
+
+        renderProgress({
+          processed,
+          total,
+          extras: {
+            scope: "groups",
+            embedded,
+            tokens,
+            "rate/sec": rate.toFixed(1),
+            eta: `${Math.round(etaSec / 60)}m`,
+          },
+        });
+
+        if (!isInteractive) {
+          logger.info(
+            {
+              scope: "groups",
+              processed,
+              total,
+              percent: Math.round((processed / total) * 100),
+              embedded,
+              tokens,
+              rateSec: Number(rate.toFixed(2)),
+              etaMin: Math.round(etaSec / 60),
+            },
+            "embed progress",
+          );
+        }
       }
+      endProgress();
     }
 
     return {

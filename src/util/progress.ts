@@ -12,6 +12,14 @@
 
 const isTTY = process.stderr.isTTY ?? false;
 
+/**
+ * Whether the current process is attached to an interactive terminal.
+ * Phases use this to decide between the live progress bar (TTY) and
+ * periodic structured JSON logs (non-TTY) — emitting both interleaves
+ * the bar with log lines and looks broken to a human watcher.
+ */
+export const isInteractive = isTTY;
+
 export interface ProgressState {
   processed: number;
   total: number;
